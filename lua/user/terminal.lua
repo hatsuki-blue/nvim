@@ -2,7 +2,7 @@
 --   * F4 でパネルを開閉。閉じても中のプロセス (ssh / claude など) は動き続ける
 --   * パネルはエディタの下に開く (サイドバーのツリーの下には潜り込まない)
 --   * パネル右側にターミナル一覧。追加/分割は「今のターミナルと同じ種類」で開く
---     (SSH 中なら同じホストへの SSH、この PC なら pwsh)
+--     (SSH 中なら同じホストへの SSH、この PC ならシェル)
 local M = {}
 local api = vim.api
 
@@ -10,7 +10,14 @@ local SIDEBAR = { ["neo-tree"] = true, ["remote-tree"] = true, ["term-list"] = t
 local LIST_W = 26
 local I = { pc = "\u{f489}", server = "\u{f233}", claude = "\u{f544}" }
 
-M.shell_cmd = vim.fn.executable("pwsh") == 1 and { "pwsh", "-NoLogo" } or { "powershell", "-NoLogo" }
+-- この PC のシェル。Windows は PowerShell 7 (無ければ Windows PowerShell)、Linux / macOS は $SHELL
+local is_windows = vim.fn.has("win32") == 1
+if is_windows then
+  M.shell_cmd = vim.fn.executable("pwsh") == 1 and { "pwsh", "-NoLogo" } or { "powershell", "-NoLogo" }
+else
+  M.shell_cmd = { vim.env.SHELL ~= nil and vim.env.SHELL ~= "" and vim.env.SHELL or "sh" }
+end
+M.shell_name = vim.fn.fnamemodify(M.shell_cmd[1], ":t:r")
 M.last = nil -- 最後に使っていたターミナル
 M.local_shell = nil
 M.order = {} -- 一覧に並べる順 (開いた順)
@@ -189,7 +196,7 @@ end
 function M.run(cmd, opts)
   opts = opts or {}
   if type(cmd) == "string" then
-    cmd = vim.list_extend(vim.deepcopy(M.shell_cmd), { "-Command", cmd })
+    cmd = vim.list_extend(vim.deepcopy(M.shell_cmd), { is_windows and "-Command" or "-c", cmd })
   end
   local buf = api.nvim_create_buf(false, false) -- タブ一覧には出さない
   for k, v in pairs(opts.vars or {}) do vim.b[buf][k] = v end
@@ -216,7 +223,7 @@ end
 -- この PC のシェル (1つを使い回す)
 function M.shell()
   if alive(M.local_shell) then return M.show(M.local_shell) end
-  M.local_shell = M.run(M.shell_cmd, { vars = { term_label = "pwsh", autoclose = true } })
+  M.local_shell = M.run(M.shell_cmd, { vars = { term_label = M.shell_name, autoclose = true } })
 end
 
 -- 追加 / 分割: 今のターミナルと同じ種類で開く
@@ -228,7 +235,7 @@ function M.new_like(split, src)
   if is_term(src) and vim.b[src].remote_target then
     return require("user.remote").connect(vim.b[src].remote_target, { cwd = vim.b[src].remote_cwd, split = split })
   end
-  return M.run(M.shell_cmd, { split = split, vars = { term_label = "pwsh", autoclose = true } })
+  return M.run(M.shell_cmd, { split = split, vars = { term_label = M.shell_name, autoclose = true } })
 end
 
 -- F4: パネルの開閉。隠したときに並んでいたターミナルを、そのまま並べて戻す
