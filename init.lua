@@ -47,12 +47,50 @@ for _, k in ipairs({ "h", "j", "k", "l" }) do
   map("t", "<M-" .. k .. ">", [[<C-\><C-n><C-w>]] .. k)
 end
 map("n", "<leader>w", "<cmd>w<CR>", { desc = "保存" })
+-- VSCode と同じ Ctrl-s でも保存 (入力中・選択中でも可)
+map({ "n", "i", "x" }, "<C-s>", "<Cmd>w<CR><Esc>", { desc = "保存" })
+
+-- VSCode と同じ Ctrl-z で元に戻す / Ctrl-y でやり直し (入力中でも可)
+--   * nvim 本来の Ctrl-z は「nvim を一時停止する」キー。Windows では何も起きない
+--   * Ctrl-y (本来は画面を1行スクロール) は潰れるが、スクロールは Ctrl-e / ホイールで足りる
+--   * ターミナルの中では割り当てない (シェルに Ctrl-z / Ctrl-y がそのまま届く)
+map({ "n", "x" }, "<C-z>", "u", { desc = "元に戻す" })
+map("i", "<C-z>", "<Cmd>undo<CR>", { desc = "元に戻す" })
+map({ "n", "x" }, "<C-y>", "<C-r>", { desc = "やり直し" })
+map("i", "<C-y>", "<Cmd>redo<CR>", { desc = "やり直し" })
+-- 入力中の元に戻すが、細かく刻まれるようにする (そのままだと、入力を始めてから Esc までが
+-- 1回分になり、Ctrl-z で書いたものが全部消える)。スペースと改行で区切る
+map("i", "<Space>", "<C-g>u<Space>")
+map("i", "<CR>", "<C-g>u<CR>")
 map("n", "<leader>..", function()
   vim.cmd("cd ..")
   vim.cmd("Neotree dir=" .. vim.fn.fnameescape(vim.fn.getcwd()))
 end, { desc = "作業ディレクトリを1つ上へ" })
 map("v", "<", "<gv")
 map("v", ">", ">gv")
+
+-- ファイルをクリックしたら、すぐ入力できる状態にする (VSCode と同じ感覚)
+--   * クリックだけだと操作モードのままで、文字を打つと Vim のコマンドになってしまうため
+--   * ドラッグでの範囲選択は今までどおり (選択中に離したときは何もしない)
+--   * ツリー・ターミナル・読み取り専用のファイルには効かない
+--   * やめたいときは、下の true を false にする
+vim.g.click_to_insert = true
+-- ※全体 (グローバル) に割り当てると nvim のダブルクリック判定が乱れるので、
+--   普通のファイルのバッファにだけ割り当てる
+vim.api.nvim_create_autocmd("BufWinEnter", {
+  callback = function(ev)
+    -- ツリー・一覧 (buftype=nofile) などには割り当てない (それぞれ独自のクリック処理があるため)
+    if vim.b[ev.buf].click_insert_mapped or vim.bo[ev.buf].buftype ~= "" then return end
+    vim.b[ev.buf].click_insert_mapped = true
+    vim.keymap.set("n", "<LeftRelease>", function()
+      local b = vim.api.nvim_get_current_buf()
+      if vim.g.click_to_insert and vim.bo[b].buftype == "" and vim.bo[b].modifiable and not vim.bo[b].readonly
+        and vim.api.nvim_get_mode().mode == "n" then
+        vim.cmd("startinsert")
+      end
+    end, { buffer = ev.buf, desc = "クリックしたら入力状態に" })
+  end,
+})
 
 vim.api.nvim_create_autocmd("TextYankPost", {
   callback = function() vim.hl.on_yank() end,
@@ -112,11 +150,13 @@ vim.api.nvim_create_autocmd("VimEnter", {
 local cheatsheet = {
   " 基本操作                              ",
   "  i           文字を入力する (Esc で戻る)",
-  "  <Space>w    保存                       ",
+  "  Ctrl-s / <Space>w  保存                ",
+  "  Tab         補完を確定 (薄い文字を確定)",
   "  <Space>q    今のファイルを閉じる       ",
   "  :qa         nvim を終了                ",
   "  Alt-h/j/k/l 左/下/上/右の画面へ移動    ",
-  "  u / Ctrl-r  元に戻す / やり直す        ",
+  "  Ctrl-z / Ctrl-y  元に戻す / やり直す   ",
+  "  (操作モードでは u / Ctrl-r も可)       ",
   "  dd / yy / p 行を 削除 / コピー / 貼付  ",
   "  /文字 Enter 検索 (n で次、Esc で解除)  ",
   "",
@@ -140,6 +180,9 @@ local cheatsheet = {
   "  <Space>rn   名前変更                   ",
   "  <Space>ca   修正候補                   ",
   "  <Space>cf   整形 (保存時にも自動)      ",
+  "  <Space>d    この行のエラーを詳しく表示 ",
+  "  ]d / [d     次 / 前のエラーへ移動      ",
+  "  <Space>xx   このファイルのエラー一覧   ",
   "  gcc         行コメント切り替え         ",
   "",
   " ターミナル                             ",
@@ -256,6 +299,7 @@ require("lazy").setup({
         { "<leader>t", group = "ターミナル / SSH / Claude" },
         { "<leader>c", group = "コード" },
         { "<leader>r", group = "リネーム" },
+        { "<leader>x", group = "エラー一覧" },
       },
     },
     keys = { { "<leader>?", function() require("which-key").show({ global = false }) end, desc = "このバッファのキー一覧" } },
@@ -428,7 +472,21 @@ require("lazy").setup({
         -- rust / toml は LSP (rust_analyzer / taplo) にフォールバック
         markdown = { "prettier" },
       },
-      format_on_save = { timeout_ms = 1000, lsp_format = "fallback" },
+      -- 構文エラーがあるときは整形しない (; 抜けなどで、次の行とつながって崩れるのを防ぐ)
+      -- 判定は treesitter (今の文字そのものを即座に解析) と LSP のエラーの両方で行う
+      format_on_save = function(bufnr)
+        local broken = #vim.diagnostic.get(bufnr, { severity = vim.diagnostic.severity.ERROR }) > 0
+        local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+        if ok and parser then
+          local tree = parser:parse()[1]
+          broken = broken or (tree and tree:root():has_error())
+        end
+        if broken then
+          vim.notify("構文エラーがあるため、自動整形はしませんでした (保存はしています)", vim.log.levels.WARN)
+          return nil
+        end
+        return { timeout_ms = 1000, lsp_format = "fallback" }
+      end,
     },
   },
 
@@ -455,14 +513,73 @@ require("lazy").setup({
   {
     "saghen/blink.cmp", version = "1.*",
     opts = {
-      keymap = { preset = "default" }, -- C-y 確定 / C-n,C-p 選択
-      fuzzy = { implementation = "lua" }, -- Rust ビルド不要
+      -- VSCode と同じく Tab で補完を確定 (Tab/Shift-Tab で候補を移動、Enter は普通の改行)
+      -- 候補が出ていないときの Tab は普通のインデント
+      keymap = { preset = "super-tab" },
+      -- 選んでいる候補の残りをカーソルの後ろに薄く表示 (例: #include <stdi → o.h> が薄く出る)
+      completion = { ghost_text = { enabled = true } },
+      -- 候補の絞り込みは Rust 版 (完成品を自動ダウンロード。ビルド不要)。取得できない環境では Lua 版で動く
+      -- ※Lua 版は、候補が出た後に "o.h" のように素早く打つと絞り込みが追いつかず、
+      --   #include <stdio.h で Tab を押すと stdint.h が入ることがある
+      fuzzy = { implementation = "prefer_rust" },
       sources = { default = { "lsp", "path", "buffer" } },
     },
   },
 }, {
   checker = { enabled = false },
 })
+
+-- ===== C / C++ (clangd) =====
+-- Windows で MSYS2 / WinLibs の gcc を使う場合、clangd は既定で Visual Studio (MSVC) 用として
+-- 解析してしまい、stdio.h が見つからずに #include や printf が誤ってエラーになる。
+-- gcc (MinGW) 用として解析させる。プロジェクトに compile_commands.json /
+-- compile_flags.txt がある場合はそちらが優先される
+if vim.fn.has("win32") == 1 and vim.fn.executable("gcc") == 1 then
+  vim.lsp.config("clangd", {
+    init_options = { fallbackFlags = { "--target=x86_64-w64-mingw32" } },
+  })
+end
+
+-- ===== エラー / 警告の表示 =====
+-- 行の右側にエラー内容を表示し、左端に E/W などの印を出す
+-- 文章は日本語に置き換える (lua/user/diag_ja.lua の対応表。表にないものは英語のまま)
+local diag_ja = require("user.diag_ja")
+vim.diagnostic.config({
+  virtual_text = {
+    prefix = "●",
+    spacing = 2,
+    format = function(d) return diag_ja.text(d.message) end,
+  },
+  severity_sort = true, -- 同じ行に複数あるときはエラーを優先して表示
+  -- <Space>d の詳細表示: 日本語と、元の英語の両方を出す (どのツールの指摘かも出す)
+  float = {
+    border = "rounded",
+    source = true,
+    format = function(d)
+      local ja = diag_ja.translate(d.message)
+      return ja and (ja .. "\n  (" .. d.message .. ")") or d.message
+    end,
+  },
+  signs = {
+    text = {
+      [vim.diagnostic.severity.ERROR] = "E",
+      [vim.diagnostic.severity.WARN] = "W",
+      [vim.diagnostic.severity.INFO] = "I",
+      [vim.diagnostic.severity.HINT] = "H",
+    },
+  },
+})
+map("n", "<leader>xx", function()
+  local items = vim.diagnostic.toqflist(vim.diagnostic.get(0))
+  for _, it in ipairs(items) do it.text = diag_ja.text(it.text) end
+  vim.fn.setloclist(0, {}, " ", { title = "エラー一覧", items = items })
+  vim.cmd("lopen")
+end, { desc = "このファイルのエラー一覧" })
+
+-- ツール自身が日本語のメッセージを持っているものは、日本語版で起動する
+--   (Pyright は PC の言語設定から自動で日本語になる)
+vim.lsp.config("ts_ls", { init_options = { locale = "ja" } })
+vim.lsp.config("lua_ls", { cmd = { "lua-language-server", "--locale=ja-jp" } })
 
 -- ===== LSP キーマップ =====
 vim.api.nvim_create_autocmd("LspAttach", {
