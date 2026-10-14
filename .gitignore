@@ -1,1 +1,4 @@
 *.bak
+# 環境ごとのスイッチ (:Offline / :NoIcons で作られる。PC ごとに違うのでリポジトリには入れない)
+offline
+no-icons

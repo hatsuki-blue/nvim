@@ -5,7 +5,8 @@
 local M = {}
 local api = vim.api
 
-local I = {
+-- Nerd Font が無い環境 (no-icons) では普通の文字にする
+local I = vim.g.have_nerd_font == false and { server = "@", folder = "+", file = " ", up = "^" } or {
   server = "\u{f233}",
   folder = "\u{f07b}",
   file = "\u{f15b}",

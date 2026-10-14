@@ -17,8 +17,10 @@ add("^Expected ';' after do/while statement$", "do-while の後に ';' があり
 add("^Expected ';' after top level declarator$", "宣言の後に ';' がありません")
 add("^Expected ';' after (.-)$", "{1} の後に ';' がありません")
 add("^Expected ';' in '(.-)'$", "'{1}' の中に ';' がありません")
-add("^Expected '(.-)' after '(.-)'$", "'{2}' の後に '{1}' がありません")
-add("^Expected '(.-)'$", "'{1}' がありません (閉じ忘れ・書き忘れ)")
+-- ※'([^']+)' と書いて引用符の中だけに一致させる ('(.-)' だと gcc の
+--   "expected ',' or ';' before 'x'" 全体に一致して誤訳になる)
+add("^Expected '([^']+)' after '([^']+)'$", "'{2}' の後に '{1}' がありません")
+add("^Expected '([^']+)'$", "'{1}' がありません (閉じ忘れ・書き忘れ)")
 add("^Expected expression$", "式がありません (書きかけ、または余分な記号があります)")
 add("^Expected statement$", "文がありません (余分な記号や、カッコの対応を確認してください)")
 add("^Expected identifier or '%('$", "名前 (識別子) がありません")
@@ -111,6 +113,55 @@ add("^No newline at end of file$", "ファイルの最後に改行がありま�
 add("^Invalid preprocessing directive$", "不正なプリプロセッサ命令です (#include などのつづりを確認)")
 add("^Unterminated conditional directive$", "#if / #ifdef に対応する #endif がありません")
 
+-- ===== gcc (clangd が無い環境で、user/c_check.lua が使う) =====
+-- ; や カッコ
+add("^Expected '(.-)' or '(.-)' before '(.-)' token$", "'{3}' の前に '{1}' か '{2}' がありません (前の行の ; 抜けなど)")
+add("^Expected '(.-)' or '(.-)' before '(.-)'$", "'{3}' の前に '{1}' か '{2}' がありません (前の行の ; 抜けなど)")
+add("^Expected expression before '(.-)' token$", "'{1}' の前に式がありません (書きかけ、または余分な記号があります)")
+add("^Expected expression before '(.-)'$", "'{1}' の前に式がありません (書きかけ、または余分な記号があります)")
+add("^Expected identifier or '%(' before '(.-)' token$", "'{1}' の前に名前 (識別子) がありません")
+add("^Expected identifier or '%(' before '(.-)'$", "'{1}' の前に名前 (識別子) がありません")
+add("^Expected '(.-)' before '(.-)' token$", "'{2}' の前に '{1}' がありません")
+add("^Expected '(.-)' before '(.-)'$", "'{2}' の前に '{1}' がありません")
+add("^Expected declaration or statement at end of input$", "ファイルが途中で終わっています (} の閉じ忘れ)")
+add("^Missing terminating (.) character$", "閉じの {1} がありません (文字列・文字が閉じていません)")
+add("^Stray '(.-)' in program$", "使えない文字が入っています (全角スペースや全角の記号など)")
+-- 宣言 / 関数
+add("^'(.-)' undeclared %(first use in this function%)$", "'{1}' は宣言されていません (宣言忘れ・書き間違い)")
+add("^'(.-)' undeclared here %(not in a function%)$", "'{1}' は宣言されていません (宣言忘れ・書き間違い)")
+add("^'(.-)' redeclared as different kind of symbol$", "'{1}' が、別の種類として宣言し直されています")
+add("^Implicit declaration of function '(.-)'$", "関数 '{1}' が宣言されていません (関数の宣言・#include を確認してください)")
+add("^Too few arguments to function '(.-)'$", "関数 '{1}' の引数が足りません")
+add("^Too many arguments to function '(.-)'$", "関数 '{1}' の引数が多すぎます")
+add("^Passing argument (%d+) of '(.-)' .*$", "関数 '{2}' の {1} 番目の引数の型が合いません")
+add("^Return type defaults to 'int'$", "戻り値の型が書かれていません (int とみなします)")
+add("^'return' with no value, in function returning non%-void$", "戻り値のある関数で、値のない return をしています")
+add("^Control reaches end of non%-void function$", "戻り値のある関数なのに、最後まで return がありません")
+add("^Function returns address of local variable$", "ローカル変数のアドレスを返しています (関数を抜けると無効になります)")
+add("^(.-): No such file or directory$", "ヘッダファイル '{1}' が見つかりません")
+-- 型 / 変換
+add("^Initialization of '(.-)' from '(.-)' makes pointer from integer without a cast$", "整数 ({2}) をポインタ ({1}) として使っています")
+add("^Assignment to '(.-)' from '(.-)' makes pointer from integer without a cast$", "整数 ({2}) をポインタ ({1}) として使っています")
+add("^Initialization of '(.-)' from '(.-)' makes integer from pointer without a cast$", "ポインタ ({2}) を整数 ({1}) として使っています")
+add("^Assignment to '(.-)' from '(.-)' makes integer from pointer without a cast$", "ポインタ ({2}) を整数 ({1}) として使っています")
+add("^Initialization of '(.-)' from incompatible pointer type '(.-)'$", "ポインタの型が合いません ({1} に {2} を使っています)")
+add("^Assignment to '(.-)' from incompatible pointer type '(.-)'$", "ポインタの型が合いません ({1} に {2} を使っています)")
+add("^Comparison of integer expressions of different signedness: '(.-)' and '(.-)'$", "符号の異なる整数を比較しています ('{1}' と '{2}')")
+add("^Lvalue required as left operand of assignment$", "代入の左側に、代入できないもの (数値など) があります")
+-- 配列
+add("^Array subscript (%-?%d+) is above array bounds of '(.-)'$", "添字 {1} は配列 ({2}) の範囲外です")
+add("^Subscripted value is neither array nor pointer nor vector$", "配列やポインタではないものに [ ] を使っています")
+-- printf の書式
+add("^Format '(.-)' expects argument of type '(.-)', but argument (%d+) has type '(.-)'$", "書式 '{1}' は '{2}' 型を受け取りますが、{3} 番目の引数は '{4}' 型です")
+add("^Format '(.-)' expects a matching '(.-)' argument$", "書式 '{1}' に対応する引数がありません ('{2}' 型が必要)")
+add("^Too many arguments for format$", "書式に対して、引数が多すぎます")
+-- よくある書き間違い
+add("^Suggest parentheses around assignment used as truth value$", "条件の中で代入 (=) をしています。比較なら == を使います")
+add("^Statement with no effect$", "この文は何もしていません")
+add("^Variable '(.-)' set but not used$", "変数 '{1}' に値を入れていますが、使われていません")
+add("^'(.-)' is used uninitialized$", "変数 '{1}' に値を入れる前に使っています")
+add("^Division by zero$", "0 で割っています")
+
 -- ===== Ruff (Python) =====
 add("^Expected an indented block after function definition$", "関数定義の後に、字下げしたブロックが必要です")
 add("^Expected an indented block after (.-)$", "{1} の後に、字下げしたブロックが必要です")
@@ -138,9 +189,13 @@ end
 function M.translate(msg)
   if type(msg) ~= "string" or msg == "" then return nil end
   local base, fix = strip_fix(msg)
-  base = base:gsub("^%l", string.upper) -- clangd は先頭を大文字にする。他のツールにも合わせる
+  base = base:gsub("%s*%[%-W[^%]]*%]$", "") -- gcc が末尾に付ける警告の種類名 ([-Wformat=] など)
+  -- clangd は先頭を大文字にするので、先頭を大文字にした文でも照合する。
+  -- ただし元の文で一致するならそちらを優先 (ファイル名などの大文字小文字を変えないため)
+  local upper = base:gsub("^%l", string.upper)
   for _, r in ipairs(rules) do
     local caps = { base:match(r[1]) }
+    if #caps == 0 then caps = { upper:match(r[1]) } end
     if #caps > 0 then
       local ja = r[2]:gsub("{(%d)}", function(n) return caps[tonumber(n)] or "" end)
       if fix then ja = ja .. " (自動修正あり: <Space>ca)" end

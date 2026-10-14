@@ -8,7 +8,9 @@ local api = vim.api
 
 local SIDEBAR = { ["neo-tree"] = true, ["remote-tree"] = true, ["term-list"] = true }
 local LIST_W = 26
-local I = { pc = "\u{f489}", server = "\u{f233}", claude = "\u{f544}" }
+-- Nerd Font が無い環境 (no-icons) では普通の文字にする
+local I = vim.g.have_nerd_font == false and { pc = ">", server = "@", claude = "*" }
+  or { pc = "\u{f489}", server = "\u{f233}", claude = "\u{f544}" }
 
 -- この PC のシェル。Windows は PowerShell 7 (無ければ Windows PowerShell)、Linux / macOS は $SHELL
 local is_windows = vim.fn.has("win32") == 1

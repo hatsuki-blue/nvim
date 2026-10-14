@@ -2,6 +2,22 @@
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
+-- ===== 環境ごとのスイッチ (学校の PC など、制限のある環境向け) =====
+-- 設定フォルダに空のファイルを置くか、環境変数で切り替える。nvim 内の :Offline / :NoIcons でも切り替え可
+--   offline  : 起動時の自動ダウンロード (LSP・整形ツール・パーサー・補完の高速版) をしない。
+--              プロキシなどで外に出られない環境で、起動のたびに失敗・待ちが起きるのを防ぐ
+--   no-icons : Nerd Font が無い環境向けに、アイコンを使わず普通の文字で表示する
+local function flag(name, env)
+  return vim.env[env] == "1" or vim.uv.fs_stat(vim.fn.stdpath("config") .. "/" .. name) ~= nil
+end
+vim.g.offline = flag("offline", "NVIM_OFFLINE")
+vim.g.have_nerd_font = not flag("no-icons", "NVIM_NO_ICONS")
+local offline, icons = vim.g.offline, vim.g.have_nerd_font
+if not icons then
+  -- アイコン用のプラグインを読み込ませない (各プラグインはアイコン無しの表示に切り替わる)
+  package.preload["nvim-web-devicons"] = function() error("nvim-web-devicons は no-icons で無効") end
+end
+
 -- 文字コード: 内部は UTF-8、日本語の古いファイル(Shift_JIS/EUC-JP)も自動判別して開く
 vim.opt.encoding = "utf-8"
 vim.opt.fileencoding = "utf-8"
@@ -20,7 +36,12 @@ o.cursorline = true
 o.signcolumn = "yes"
 o.termguicolors = true
 o.mouse = "a"
-o.clipboard = "unnamedplus"
+-- OS のクリップボードと共有 (xclip などのクリップボード連携が無い環境では使わない。
+-- 無いのに設定すると、コピーのたびに "clipboard: No provider" と出る)
+if vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1 or vim.fn.executable("xclip") == 1
+  or vim.fn.executable("xsel") == 1 or vim.fn.executable("wl-copy") == 1 then
+  o.clipboard = "unnamedplus"
+end
 o.ignorecase = true
 o.smartcase = true
 o.undofile = true
@@ -86,8 +107,22 @@ map("v", ">", ">gv")
 --   * 別の nvim が今そのファイルを開いている → 読み取り専用で開く (二重編集を防ぐ)
 --   * 持ち主がいない古いスワップで、保存していない編集が入っている → 自動で復元して知らせる
 --   * 持ち主がいない古いスワップで、編集が入っていない → 削除して普通に開く
+-- スワップの持ち主の nvim が、今もこの PC で動いているか
+--   * 別の PC で作られたスワップ (学校のように、ホームがネットワーク上で複数の PC から使う場合) は、
+--     この PC からは確かめられないので「動いていない」とみなす
+--   * 番号が同じでも、別のプログラムに番号が再利用されていることがあるので、
+--     Linux では実際に nvim かどうかも確かめる
 local function swap_owner_alive(info)
-  return info.pid and info.pid > 0 and info.pid ~= vim.uv.os_getpid() and vim.uv.kill(info.pid, 0) == 0
+  if not (info.pid and info.pid > 0) or info.pid == vim.uv.os_getpid() then return false end
+  if info.host and info.host ~= "" and info.host:lower() ~= vim.uv.os_gethostname():lower() then return false end
+  if vim.uv.kill(info.pid, 0) ~= 0 then return false end
+  local f = io.open("/proc/" .. info.pid .. "/comm", "r")
+  if f then
+    local comm = f:read("*l") or ""
+    f:close()
+    return comm:find("nvim", 1, true) ~= nil
+  end
+  return true
 end
 
 vim.api.nvim_create_autocmd("SwapExists", {
@@ -99,7 +134,11 @@ vim.api.nvim_create_autocmd("SwapExists", {
     if swap_owner_alive(info) then
       vim.v.swapchoice = "o"
       vim.schedule(function()
-        vim.notify("「" .. name .. "」は別の nvim で開いているため、読み取り専用で開きました", vim.log.levels.WARN)
+        vim.notify(
+          "「" .. name .. "」は、別の nvim (端末のほかのタブなど) で開いているため、読み取り専用で開きました。\n"
+            .. "そちらを閉じてから開き直してください。どうしても編集するときは :set noreadonly",
+          vim.log.levels.WARN
+        )
       end)
     elseif info.dirty == 1 then
       vim.v.swapchoice = "r"
@@ -287,6 +326,11 @@ local cheatsheet = {
   "  (接続先ツリー) ? で操作一覧            ",
   "  接続先のファイルは :w で接続先に保存   ",
   "",
+  " 学校など制限のある環境                ",
+  "  :Offline    自動ダウンロードをしない   ",
+  "  :NoIcons    アイコン無し (□ になるとき)",
+  "  (どちらも再実行でオフ。再起動で反映)   ",
+  "",
   " 困ったら: <Space> を押して待つ / F1 でこの画面",
   " (この画面は q か Esc で閉じる)",
 }
@@ -344,13 +388,23 @@ require("lazy").setup({
   { "sainnhe/everforest", lazy = true },
   { "Mofiqul/dracula.nvim", lazy = true },
 
-  -- アイコン (Nerd Font 必須)
+  -- アイコン (Nerd Font 必須。no-icons のときは読み込まない)
   { "nvim-tree/nvim-web-devicons", lazy = true },
 
   -- バッファをタブ表示
   {
     "akinsho/bufferline.nvim", event = "VeryLazy",
-    opts = { options = { diagnostics = "nvim_lsp" } },
+    opts = {
+      options = vim.tbl_extend("force", { diagnostics = "nvim_lsp" }, icons and {} or {
+        show_buffer_icons = false,
+        buffer_close_icon = "x",
+        close_icon = "x",
+        modified_icon = "+",
+        left_trunc_marker = "<",
+        right_trunc_marker = ">",
+        indicator = { style = "underline" },
+      }),
+    },
     keys = {
       { "<S-l>", "<cmd>BufferLineCycleNext<CR>", desc = "次のバッファ" },
       { "<S-h>", "<cmd>BufferLineCyclePrev<CR>", desc = "前のバッファ" },
@@ -363,9 +417,23 @@ require("lazy").setup({
     dependencies = {
       "MunifTanjim/nui.nvim",
       -- 通知の時刻を 24 時間表記 (例 18:43:31) に固定
-      { "rcarriga/nvim-notify", opts = { time_formats = { notification = "%H:%M:%S", notification_history = "%H:%M:%S" } } },
+      { "rcarriga/nvim-notify", opts = {
+        time_formats = { notification = "%H:%M:%S", notification_history = "%H:%M:%S" },
+        icons = (not icons) and { ERROR = "E", WARN = "W", INFO = "I", DEBUG = "D", TRACE = "T" } or nil,
+      } },
     },
-    opts = {},
+    opts = icons and {} or {
+      cmdline = {
+        format = {
+          cmdline = { icon = ">" },
+          search_down = { icon = "/" },
+          search_up = { icon = "?" },
+          filter = { icon = "$" },
+          lua = { icon = "lua" },
+          help = { icon = "?" },
+        },
+      },
+    },
   },
 
 
@@ -374,6 +442,19 @@ require("lazy").setup({
     "folke/which-key.nvim", event = "VeryLazy",
     opts = {
       delay = 150, -- <Space> を押して0.15秒でメニュー表示
+      -- no-icons のときは、キー名もアイコンではなく文字で表示 (which-key 公式の例)
+      icons = icons and {} or {
+        mappings = false, breadcrumb = ">>", separator = "->", group = "+",
+        keys = {
+          Up = "<Up> ", Down = "<Down> ", Left = "<Left> ", Right = "<Right> ",
+          C = "<C-…> ", M = "<M-…> ", D = "<D-…> ", S = "<S-…> ",
+          CR = "<CR> ", Esc = "<Esc> ", ScrollWheelDown = "<ScrollWheelDown> ",
+          ScrollWheelUp = "<ScrollWheelUp> ", NL = "<NL> ", BS = "<BS> ",
+          Space = "<Space> ", Tab = "<Tab> ",
+          F1 = "<F1>", F2 = "<F2>", F3 = "<F3>", F4 = "<F4>", F5 = "<F5>", F6 = "<F6>",
+          F7 = "<F7>", F8 = "<F8>", F9 = "<F9>", F10 = "<F10>", F11 = "<F11>", F12 = "<F12>",
+        },
+      },
       -- ツリー/ターミナル一覧では自動表示しない (キー入力の邪魔になるため)
       disable = { ft = { "remote-tree", "term-list", "neo-tree" }, bt = { "terminal" } },
       spec = {
@@ -392,21 +473,25 @@ require("lazy").setup({
   {
     "nvim-lualine/lualine.nvim",
     opts = {
-      options = { theme = "auto", globalstatus = true },
+      options = icons and { theme = "auto", globalstatus = true }
+        or { theme = "auto", globalstatus = true, icons_enabled = false,
+             section_separators = "", component_separators = "|" },
       sections = {
         lualine_b = {
           { function()
             -- 接続先にいるときは「ホスト:パス」、この PC では作業ディレクトリ
             local rs = require("user.remote").state
-            if vim.b.remote_file then return "\u{f233} " .. vim.b.remote_file.host .. " (接続先)" end
+            local srv, pc, dir = "\u{f233} ", "\u{f108} ", "\u{f07c} "
+            if not icons then srv, pc, dir = "SSH ", "", "" end
+            if vim.b.remote_file then return srv .. vim.b.remote_file.host .. " (接続先)" end
             if vim.b.remote_host then
-              return "\u{f233} " .. vim.b.remote_host .. ":" .. (vim.b.remote_cwd or "~")
+              return srv .. vim.b.remote_host .. ":" .. (vim.b.remote_cwd or "~")
             end
             if vim.bo.filetype == "remote-tree" then
-              return "\u{f233} " .. (rs.host or "") .. ":" .. (rs.cwd or "")
+              return srv .. (rs.host or "") .. ":" .. (rs.cwd or "")
             end
-            if vim.bo.buftype == "terminal" then return "\u{f108} この PC" end
-            return "\u{f07c} " .. vim.fn.getcwd()
+            if vim.bo.buftype == "terminal" then return pc .. "この PC" end
+            return dir .. vim.fn.getcwd()
           end },
           "branch", "diff", "diagnostics",
         },
@@ -431,6 +516,19 @@ require("lazy").setup({
     dependencies = { "nvim-lua/plenary.nvim", "nvim-tree/nvim-web-devicons", "MunifTanjim/nui.nvim" },
     opts = {
       close_if_last_window = true, -- ツリーだけが残ったら終了 (ツリーが全画面に広がるのを防ぐ)
+      -- no-icons のときは、フォルダや git の印を普通の文字で表示
+      default_component_configs = icons and {} or {
+        icon = { folder_closed = "+", folder_open = "-", folder_empty = "-", default = " " },
+        indent = { expander_collapsed = ">", expander_expanded = "v" },
+        modified = { symbol = "[+]" },
+        git_status = {
+          symbols = {
+            added = "A", modified = "M", deleted = "D", renamed = "R",
+            untracked = "?", ignored = "i", unstaged = "U", staged = "S", conflict = "!",
+          },
+        },
+        diagnostics = { symbols = { error = "E", warn = "W", info = "I", hint = "H" } },
+      },
       -- ツリーからファイルを開いたら、編集できる状態 (入力モード) にする
       event_handlers = {
         { event = "file_opened", handler = function() vim.schedule(_G.UserEnterEdit) end },
@@ -519,7 +617,8 @@ require("lazy").setup({
     "williamboman/mason-lspconfig.nvim",
     dependencies = { "williamboman/mason.nvim", "neovim/nvim-lspconfig" },
     opts = {
-      ensure_installed = {
+      -- offline のときは自動導入しない (入れたいものは :Mason から手動で)
+      ensure_installed = offline and {} or {
         "lua_ls",
         "clangd",                      -- C / C++
         "ts_ls", "eslint",             -- JS / TS / React
@@ -539,7 +638,9 @@ require("lazy").setup({
     "WhoIsSethDaniel/mason-tool-installer.nvim",
     dependencies = { "williamboman/mason.nvim" },
     opts = {
-      ensure_installed = { "prettier", "stylua", "tree-sitter-cli", "goimports", "gofumpt", "shfmt" },
+      ensure_installed = offline and {}
+        or { "prettier", "stylua", "tree-sitter-cli", "goimports", "gofumpt", "shfmt" },
+      run_on_start = not offline,
     },
   },
 
@@ -590,11 +691,19 @@ require("lazy").setup({
     },
   },
 
-  -- シンタックスハイライト (C コンパイラ gcc/clang が無ければ自動でスキップ)
+  -- シンタックスハイライト
+  --   パーサーの自動導入には C コンパイラ (gcc/clang) と tree-sitter コマンドが必要。
+  --   どちらかが無い、または offline のときは導入を飛ばす (導入済みのパーサーでの色付けは行う)
   {
     "nvim-treesitter/nvim-treesitter", branch = "main", lazy = false, build = ":TSUpdate",
     config = function()
-      if vim.fn.executable("gcc") == 0 and vim.fn.executable("clang") == 0 then return end
+      vim.api.nvim_create_autocmd("FileType", {
+        callback = function(ev) pcall(vim.treesitter.start, ev.buf) end,
+      })
+      local has_cc = vim.fn.executable("gcc") == 1 or vim.fn.executable("clang") == 1
+      local mason_ts = vim.fn.stdpath("data") .. "/mason/bin/tree-sitter" .. (vim.fn.has("win32") == 1 and ".cmd" or "")
+      local has_ts = vim.fn.executable("tree-sitter") == 1 or vim.uv.fs_stat(mason_ts) ~= nil
+      if offline or not has_cc or not has_ts then return end
       local ok, ts = pcall(require, "nvim-treesitter")
       if not ok then return end
       ts.install({
@@ -602,9 +711,6 @@ require("lazy").setup({
         "json", "python", "lua", "markdown", "markdown_inline",
         "go", "gomod", "gosum", "rust", "bash", "yaml", "toml", "dockerfile",
         "scss", "vim", "vimdoc", "query", "regex", "diff", "gitcommit",
-      })
-      vim.api.nvim_create_autocmd("FileType", {
-        callback = function(ev) pcall(vim.treesitter.start, ev.buf) end,
       })
     end,
   },
@@ -617,17 +723,44 @@ require("lazy").setup({
       -- 候補が出ていないときの Tab は普通のインデント
       keymap = { preset = "super-tab" },
       -- 選んでいる候補の残りをカーソルの後ろに薄く表示 (例: #include <stdi → o.h> が薄く出る)
-      completion = { ghost_text = { enabled = true } },
+      -- no-icons のときは、候補一覧の種類アイコンの代わりに種類名 (Function など) を出す
+      completion = vim.tbl_extend("force", { ghost_text = { enabled = true } }, icons and {} or {
+        menu = { draw = { columns = { { "label", "label_description", gap = 1 }, { "kind" } } } },
+      }),
       -- 候補の絞り込みは Rust 版 (完成品を自動ダウンロード。ビルド不要)。取得できない環境では Lua 版で動く
       -- ※Lua 版は、候補が出た後に "o.h" のように素早く打つと絞り込みが追いつかず、
       --   #include <stdio.h で Tab を押すと stdint.h が入ることがある
-      fuzzy = { implementation = "prefer_rust" },
+      -- offline のときはダウンロードを試みず、最初から Lua 版を使う (起動のたびの失敗・警告を防ぐ)
+      fuzzy = offline and { implementation = "lua", prebuilt_binaries = { download = false } }
+        or { implementation = "prefer_rust" },
       sources = { default = { "lsp", "path", "buffer" } },
     },
   },
 }, {
   checker = { enabled = false },
+  -- luarocks は使わない (有効だと hererocks の取得を試みて、プロキシ環境で失敗・停止する)
+  rocks = { enabled = false },
+  -- no-icons のときは、:Lazy の画面のアイコンを絵文字にする (lazy.nvim 公式の例)
+  ui = { icons = icons and {} or {
+    cmd = "⌘", config = "🛠", event = "📅", ft = "📂", init = "⚙", keys = "🗝", plugin = "🔌",
+    runtime = "💻", require = "🌙", source = "📄", start = "🚀", task = "📌", lazy = "💤 ",
+  } },
 })
+
+-- ===== :Offline / :NoIcons (スイッチの切り替え。次回起動から反映) =====
+local function toggle_flag(name, label)
+  local path = vim.fn.stdpath("config") .. "/" .. name
+  if vim.uv.fs_stat(path) then
+    os.remove(path)
+    vim.notify(label .. " を オフ にしました。nvim を再起動すると反映されます")
+  else
+    local f = io.open(path, "w")
+    if f then f:close() end
+    vim.notify(label .. " を オン にしました。nvim を再起動すると反映されます")
+  end
+end
+vim.api.nvim_create_user_command("Offline", function() toggle_flag("offline", "オフラインモード (自動ダウンロードしない)") end, {})
+vim.api.nvim_create_user_command("NoIcons", function() toggle_flag("no-icons", "アイコン無しモード") end, {})
 
 -- ===== C / C++ (clangd) =====
 -- Windows で MSYS2 / WinLibs の gcc を使う場合、clangd は既定で Visual Studio (MSVC) 用として
@@ -639,6 +772,11 @@ if vim.fn.has("win32") == 1 and vim.fn.executable("gcc") == 1 then
     init_options = { fallbackFlags = { "--target=x86_64-w64-mingw32" } },
   })
 end
+-- Mason 以外で入れた clangd (学校の PC で、ホームに置いて PATH を通した場合など) も使う。
+-- Mason で入れたものと同じ設定が使われるので、二重には起動しない
+if vim.fn.executable("clangd") == 1 then vim.lsp.enable("clangd") end
+-- clangd が無い環境では、gcc でエラーを調べて表示する (lua/user/c_check.lua)
+require("user.c_check").setup()
 
 -- ===== エラー / 警告の表示 =====
 -- 行の右側にエラー内容を表示し、左端に E/W などの印を出す
