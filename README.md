@@ -67,6 +67,54 @@ nvim --version | head -1
 
 ARM (Raspberry Pi など) は `nvim-linux-arm64.tar.gz` に読み替えてください。
 
+#### sudo が使えない / プロキシがある環境 (学校の共有 PC など)
+
+管理者権限がなくても、ホームディレクトリに展開すれば使えます。
+
+**ブラウザでダウンロードする場合** (ブラウザがプロキシ経由で使えていれば、これが一番楽):
+
+1. ブラウザで <https://github.com/neovim/neovim/releases/latest> を開く
+2. `nvim-linux-x86_64.tar.gz` をダウンロード (ARM は `nvim-linux-arm64.tar.gz`)
+3. ターミナルで展開して実行
+
+```bash
+cd ~/Downloads
+tar xzf nvim-linux-x86_64.tar.gz
+./nvim-linux-x86_64/bin/nvim
+```
+
+**ターミナルだけで済ませる場合** (`プロキシホスト:ポート` などは自分の環境の値に置き換える):
+
+```bash
+cd ~
+curl -x http://プロキシホスト:ポート -U ユーザー名:パスワード -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz
+tar xzf nvim-linux-x86_64.tar.gz
+./nvim-linux-x86_64/bin/nvim
+```
+
+パスワードはシェルの履歴 (`~/.bash_history`) に残ります。共有 PC では、使い終わったら
+`history -c` で消すか、`-U ユーザー名` だけにして、パスワードは聞かれてから入力してください。
+
+**毎回パスを打ちたくないとき** (以後は `nvim` だけで起動します):
+
+```bash
+echo 'export PATH="$HOME/nvim-linux-x86_64/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+`~/Downloads` に展開した場合は、パスを `$HOME/Downloads/nvim-linux-x86_64/bin` に読み替えてください。
+
+起動時に `GLIBC_2.xx not found` と出る場合は、その PC の OS が古く、公式のバイナリが動きません。
+AppImage 形式の `nvim-linux-x86_64.appimage` を使う方法があります
+(`chmod u+x nvim-linux-x86_64.appimage` のあと、FUSE が使えない環境では
+`./nvim-linux-x86_64.appimage --appimage-extract` で展開して、中の `squashfs-root/usr/bin/nvim` を使う)。
+
+どの方法でも、起動したら `nvim --version | head -1` で、バージョンが 0.12 以上か確認してください。
+
+git や node などが入っていない環境でも、nvim 本体は動きます。
+その場合は、プラグインの導入 (git)、言語サーバー (node)、シンタックスハイライト (gcc) など、
+足りないものに関係する機能だけが使えません。
+
 ### 3. フォント (アイコン表示)
 
 ```bash

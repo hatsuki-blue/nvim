@@ -251,6 +251,8 @@ function M.edit(path)
     local buf = api.nvim_get_current_buf()
     if existing == buf and not vim.bo[buf].modified then vim.cmd("silent edit!") end -- 最新の内容に更新
     vim.b[buf].remote_file = { target = target, host = host, path = path }
+    -- 開いたら編集できる状態 (入力モード) にする
+    if _G.UserEnterEdit then vim.schedule(_G.UserEnterEdit) end
   end)
 end
 

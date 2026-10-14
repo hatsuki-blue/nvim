@@ -24,6 +24,18 @@ o.clipboard = "unnamedplus"
 o.ignorecase = true
 o.smartcase = true
 o.undofile = true
+-- スワップファイル (編集中の一時ファイル) は残す。
+--   保存し忘れたまま強制終了 (ウィンドウを閉じる・PC が落ちる) したときの復元に使う。
+--   ただし古いものが残っていると、次にそのファイルを開くたびに E325 の確認画面やエラーが出るので、
+--   下の SwapExists で自動処理し、7日たった古いものは起動時に自動で消す。
+o.swapfile = true
+-- 別の nvim で同じファイルを変更した場合は、画面に戻ったときに自動で読み直す
+o.autoread = true
+vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold" }, {
+  callback = function()
+    if vim.fn.mode() ~= "c" and vim.bo.buftype == "" then pcall(vim.cmd, "checktime") end
+  end,
+})
 o.updatetime = 250
 o.scrolloff = 8
 o.splitright = true
@@ -68,6 +80,76 @@ map("n", "<leader>..", function()
 end, { desc = "作業ディレクトリを1つ上へ" })
 map("v", "<", "<gv")
 map("v", ">", ">gv")
+
+-- ===== スワップファイルの自動処理 =====
+-- ファイルを開くときに、そのファイルのスワップが既にあった場合 (確認画面 E325 の代わり):
+--   * 別の nvim が今そのファイルを開いている → 読み取り専用で開く (二重編集を防ぐ)
+--   * 持ち主がいない古いスワップで、保存していない編集が入っている → 自動で復元して知らせる
+--   * 持ち主がいない古いスワップで、編集が入っていない → 削除して普通に開く
+local function swap_owner_alive(info)
+  return info.pid and info.pid > 0 and info.pid ~= vim.uv.os_getpid() and vim.uv.kill(info.pid, 0) == 0
+end
+
+vim.api.nvim_create_autocmd("SwapExists", {
+  callback = function(ev)
+    local sw = vim.v.swapname
+    local info = vim.fn.swapinfo(sw)
+    if info.error then return end -- 読めないときは nvim 標準の確認画面に任せる
+    local name = vim.fn.fnamemodify(ev.file ~= "" and ev.file or (info.fname or ""), ":t")
+    if swap_owner_alive(info) then
+      vim.v.swapchoice = "o"
+      vim.schedule(function()
+        vim.notify("「" .. name .. "」は別の nvim で開いているため、読み取り専用で開きました", vim.log.levels.WARN)
+      end)
+    elseif info.dirty == 1 then
+      vim.v.swapchoice = "r"
+      vim.schedule(function()
+        pcall(vim.fn.delete, sw) -- 復元に使った古いスワップは用済み (残すと次回も復元の対象になる)
+        vim.notify(
+          "「" .. name .. "」の、保存していなかった前回の編集を復元しました。\n"
+            .. "このまま保存する: Ctrl-s ／ 破棄して保存済みの内容に戻す: :e!",
+          vim.log.levels.WARN
+        )
+      end)
+    else
+      vim.v.swapchoice = "d"
+    end
+  end,
+})
+
+-- 7日以上たった、持ち主のいない古いスワップを、起動時に消す
+vim.api.nvim_create_autocmd("VimEnter", {
+  callback = function()
+    vim.defer_fn(function()
+      local dir = vim.fn.stdpath("state") .. "/swap"
+      local limit = os.time() - 7 * 24 * 3600
+      for name, kind in vim.fs.dir(dir) do
+        if kind == "file" then
+          local path = dir .. "/" .. name
+          local st = vim.uv.fs_stat(path)
+          if st and st.mtime.sec < limit then
+            local info = vim.fn.swapinfo(path)
+            if not swap_owner_alive(info) then pcall(vim.fn.delete, path) end
+          end
+        end
+      end
+    end, 3000)
+  end,
+})
+
+-- ファイルを開いた直後は、選択モードや操作モードではなく、編集できる状態 (入力モード) にする
+--   ファイルツリー・接続先ツリー・検索 (<Space>ff / fg / fb) から開いたときに使う。
+--   普通のファイル以外 (ツリー・ヘルプ・読み取り専用) では何もしない。
+--   やめたいときは vim.g.open_in_edit = false
+vim.g.open_in_edit = true
+function _G.UserEnterEdit()
+  if not vim.g.open_in_edit then return end
+  local b = vim.api.nvim_get_current_buf()
+  if vim.bo[b].buftype == "" and vim.bo[b].modifiable and not vim.bo[b].readonly
+    and vim.api.nvim_buf_get_name(b) ~= "" and not vim.api.nvim_get_mode().mode:match("^[iR]") then
+    vim.cmd("startinsert")
+  end
+end
 
 -- ファイルをクリックしたら、すぐ入力できる状態にする (VSCode と同じ感覚)
 --   * クリックだけだと操作モードのままで、文字を打つと Vim のコマンドになってしまうため
@@ -349,6 +431,10 @@ require("lazy").setup({
     dependencies = { "nvim-lua/plenary.nvim", "nvim-tree/nvim-web-devicons", "MunifTanjim/nui.nvim" },
     opts = {
       close_if_last_window = true, -- ツリーだけが残ったら終了 (ツリーが全画面に広がるのを防ぐ)
+      -- ツリーからファイルを開いたら、編集できる状態 (入力モード) にする
+      event_handlers = {
+        { event = "file_opened", handler = function() vim.schedule(_G.UserEnterEdit) end },
+      },
       filesystem = {
         follow_current_file = { enabled = true },
         filtered_items = { visible = true },
@@ -390,7 +476,21 @@ require("lazy").setup({
     config = function()
       local t = require("telescope")
       -- 選択画面 (SSH ホスト選択など) も telescope の見やすい一覧にする
-      t.setup({ extensions = { ["ui-select"] = { require("telescope.themes").get_dropdown({}) } } })
+      -- ファイルを選んで開いたら、編集できる状態 (入力モード) にする
+      local actions = require("telescope.actions")
+      local function edit_after_open(_, _)
+        actions.select_default:enhance({ post = function() vim.schedule(_G.UserEnterEdit) end })
+        return true
+      end
+      t.setup({
+        pickers = {
+          find_files = { attach_mappings = edit_after_open },
+          live_grep = { attach_mappings = edit_after_open },
+          buffers = { attach_mappings = edit_after_open },
+          oldfiles = { attach_mappings = edit_after_open },
+        },
+        extensions = { ["ui-select"] = { require("telescope.themes").get_dropdown({}) } },
+      })
       t.load_extension("ui-select")
     end,
     keys = {
