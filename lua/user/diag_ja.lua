@@ -198,7 +198,7 @@ function M.translate(msg)
     if #caps == 0 then caps = { upper:match(r[1]) } end
     if #caps > 0 then
       local ja = r[2]:gsub("{(%d)}", function(n) return caps[tonumber(n)] or "" end)
-      if fix then ja = ja .. " (自動修正あり: gra)" end
+      if fix then ja = ja .. " (自動修正あり: この行で gra)" end
       return ja
     end
   end

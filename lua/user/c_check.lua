@@ -75,7 +75,53 @@ function M.schedule(buf, delay)
   end, delay or 400)
 end
 
+-- 「; が無い」「] が無い」などのエラーの位置を、実際に書くべき場所 (前の行) に直す
+--   clangd も gcc も、; が無いと気付くのは次の行の最初の文字を読んだときなので、
+--   エラーが次の行に出てしまう (例: 7行目の int b[N] の ; 抜けが、8行目の double に出る)。
+--   エラーの位置が行の最初の文字のときだけ、前の (空でない) 行に移す。
+--   範囲はその行の行頭から行末まで (gra は、カーソルがエラーの範囲内にあるときだけ
+--   そのエラーを修正の対象にするので、行のどこにカーソルがあっても使えるように)
+--   戻り値: 行, 開始列, 終了列 (移さないときは nil)
+local function semicolon_pos(bufnr, lnum, col, msg)
+  -- 「; が無い」だけでなく、「] が無い」「) が無い」など、記号の書き忘れ全般が対象
+  --   clangd: "Expected ']'"  gcc: "expected ']' before 'int'"  TypeScript: "';' expected."
+  local m = (msg or ""):lower()
+  if not (m:find("expected '", 1, true) or m:find("' expected", 1, true)) then
+    return nil
+  end
+  local lines = api.nvim_buf_get_lines(bufnr, 0, lnum + 1, false)
+  local cur = lines[lnum + 1]
+  if not cur then return nil end
+  local first = (cur:find("%S") or 1) - 1
+  if col > first then return nil end
+  for l = lnum - 1, 0, -1 do
+    local text = lines[l + 1]
+    if text and text:find("%S") then
+      return l, 0, #(text:gsub("%s+$", ""))
+    end
+  end
+  return nil
+end
+
+-- すべての診断 (clangd も gcc も) に、上の位置の補正をかける。
+-- 補正するのは表示用の位置だけ。LSP から来た元の情報 (user_data.lsp) はそのままなので、
+-- 移した先の行で gra を押しても、clangd の自動修正 (; を入れる) が使える
+local function wrap_diagnostic_set()
+  local orig = vim.diagnostic.set
+  vim.diagnostic.set = function(ns, bufnr, diagnostics, opts)
+    if bufnr == 0 then bufnr = api.nvim_get_current_buf() end
+    if type(diagnostics) == "table" and api.nvim_buf_is_loaded(bufnr) then
+      for _, d in ipairs(diagnostics) do
+        local l, c1, c2 = semicolon_pos(bufnr, d.lnum, d.col or 0, d.message)
+        if l then d.lnum, d.col, d.end_lnum, d.end_col = l, c1, l, c2 end
+      end
+    end
+    return orig(ns, bufnr, diagnostics, opts)
+  end
+end
+
 function M.setup()
+  wrap_diagnostic_set()
   local g = api.nvim_create_augroup("user_c_check", {})
   api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "InsertLeave", "TextChanged" }, {
     group = g,

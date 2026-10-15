@@ -827,7 +827,12 @@ require("user.c_check").setup()
 local diag_ja = require("user.diag_ja")
 vim.diagnostic.config({
   virtual_text = {
-    prefix = "●",
+    -- 同じ行に複数あるときは ● を並べず「● 5件:」のように件数を出す
+    -- (文章が出るのは、そのうち一番重要な1件だけ。全部見るには Ctrl-w d)
+    prefix = function(_, i, total)
+      if total <= 1 then return "●" end
+      return i == total and ("● " .. total .. "件:") or ""
+    end,
     spacing = 2,
     format = function(d) return diag_ja.text(d.message) end,
   },
