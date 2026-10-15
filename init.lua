@@ -31,7 +31,8 @@ o.showmode = false -- lualine が表示するので不要
 o.cmdheight = 1
 o.laststatus = 3 -- ステータスラインを全体で1本
 o.number = true
-o.relativenumber = true
+-- 行番号は普通の番号にする (相対番号だと、エラーの「〜行目」と画面の数字が合わずわかりにくい)
+o.relativenumber = false
 o.cursorline = true
 o.signcolumn = "yes"
 o.termguicolors = true
@@ -68,39 +69,43 @@ o.smartindent = true
 o.wrap = false
 
 
+-- ===== キーの方針 =====
+-- Vim を覚えるため、Vim / nvim 本来のキーの動きは変えない。
+-- 追加するのは、Vim が何も割り当てていないキーだけ:
+--   * <Space> (リーダーキー) から始まるもの   * F4   * Alt-h/j/k/l
+-- 元に戻す u / やり直し Ctrl-r / 保存 :w / コピー y / 貼り付け p / 画面移動 Ctrl-w h/j/k/l などは Vim のまま
 local map = vim.keymap.set
-map("n", "<Esc>", "<cmd>nohlsearch<CR>")
--- ウィンドウ移動: 通常は Ctrl-hjkl、どこでも (ターミナル内でも) Alt-hjkl
--- ※ターミナル内の Ctrl-h/j/k/l は bash 等が使う (Ctrl-k 行削除 / Ctrl-l 画面クリア) ので奪わない
+map("n", "<Esc>", "<cmd>nohlsearch<CR>") -- 検索の色付けを消す (Vim では Esc は通常モードで何もしない)
+-- Alt-h/j/k/l: どこからでも (入力中・選択中・ターミナルの中でも) 隣の画面へ。
+-- Vim 本来の画面移動は Ctrl-w h/j/k/l (通常モードで使える。こちらを覚えるのがおすすめ)
 for _, k in ipairs({ "h", "j", "k", "l" }) do
-  map("n", "<C-" .. k .. ">", "<C-w>" .. k)
   map({ "n", "i" }, "<M-" .. k .. ">", "<Cmd>wincmd " .. k .. "<CR>")
-  -- 文字を選択中 (VISUAL) でも移動できる。選択は解除して移動する
   map({ "x", "s" }, "<M-" .. k .. ">", "<Esc><Cmd>wincmd " .. k .. "<CR>")
   map("t", "<M-" .. k .. ">", [[<C-\><C-n><C-w>]] .. k)
 end
-map("n", "<leader>w", "<cmd>w<CR>", { desc = "保存" })
--- VSCode と同じ Ctrl-s でも保存 (入力中・選択中でも可)
-map({ "n", "i", "x" }, "<C-s>", "<Cmd>w<CR><Esc>", { desc = "保存" })
+map("n", "<leader>w", "<cmd>w<CR>", { desc = "保存 (:w と同じ)" })
+-- 入力モードを Ctrl-c で抜けても、Esc と同じ扱いにする (見た目の動きは同じ)。
+--   Vim の Ctrl-c は「入力モードを抜けた」合図 (InsertLeave) を出さないため、入力中は隠している
+--   エラー表示が出ないままになる。Vim の設定でよく使われる定番の修正
+map("i", "<C-c>", "<Esc>")
 
--- VSCode と同じ Ctrl-z で元に戻す / Ctrl-y でやり直し (入力中でも可)
---   * nvim 本来の Ctrl-z は「nvim を一時停止する」キー。Windows では何も起きない
---   * Ctrl-y (本来は画面を1行スクロール) は潰れるが、スクロールは Ctrl-e / ホイールで足りる
---   * ターミナルの中では割り当てない (シェルに Ctrl-z / Ctrl-y がそのまま届く)
-map({ "n", "x" }, "<C-z>", "u", { desc = "元に戻す" })
-map("i", "<C-z>", "<Cmd>undo<CR>", { desc = "元に戻す" })
-map({ "n", "x" }, "<C-y>", "<C-r>", { desc = "やり直し" })
-map("i", "<C-y>", "<Cmd>redo<CR>", { desc = "やり直し" })
--- 入力中の元に戻すが、細かく刻まれるようにする (そのままだと、入力を始めてから Esc までが
--- 1回分になり、Ctrl-z で書いたものが全部消える)。スペースと改行で区切る
-map("i", "<Space>", "<C-g>u<Space>")
-map("i", "<CR>", "<C-g>u<CR>")
+-- 起動時の空のタブ [No Name] は、ファイルを開いたら自動で閉じる (タブ一覧に残り続けないように)
+vim.api.nvim_create_autocmd("BufReadPost", {
+  callback = function(ev)
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if b ~= ev.buf and vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buflisted and vim.bo[b].buftype == ""
+        and vim.api.nvim_buf_get_name(b) == "" and not vim.bo[b].modified
+        and vim.api.nvim_buf_line_count(b) == 1 and vim.api.nvim_buf_get_lines(b, 0, 1, false)[1] == ""
+        and #vim.fn.win_findbuf(b) == 0 then
+        vim.schedule(function() pcall(vim.api.nvim_buf_delete, b, {}) end)
+      end
+    end
+  end,
+})
 map("n", "<leader>..", function()
   vim.cmd("cd ..")
   vim.cmd("Neotree dir=" .. vim.fn.fnameescape(vim.fn.getcwd()))
 end, { desc = "作業ディレクトリを1つ上へ" })
-map("v", "<", "<gv")
-map("v", ">", ">gv")
 
 -- ===== スワップファイルの自動処理 =====
 -- ファイルを開くときに、そのファイルのスワップが既にあった場合 (確認画面 E325 の代わり):
@@ -176,11 +181,10 @@ vim.api.nvim_create_autocmd("VimEnter", {
   end,
 })
 
--- ファイルを開いた直後は、選択モードや操作モードではなく、編集できる状態 (入力モード) にする
---   ファイルツリー・接続先ツリー・検索 (<Space>ff / fg / fb) から開いたときに使う。
---   普通のファイル以外 (ツリー・ヘルプ・読み取り専用) では何もしない。
---   やめたいときは vim.g.open_in_edit = false
-vim.g.open_in_edit = true
+-- ファイルを開いた直後に、入力モードにするか (VSCode 風)。
+--   Vim を覚えるため、今は false (Vim と同じく通常モードで開く。入力は i で始める)。
+--   true にすると、ファイルツリー・接続先ツリー・検索から開いたときに入力モードになる
+vim.g.open_in_edit = false
 function _G.UserEnterEdit()
   if not vim.g.open_in_edit then return end
   local b = vim.api.nvim_get_current_buf()
@@ -190,12 +194,10 @@ function _G.UserEnterEdit()
   end
 end
 
--- ファイルをクリックしたら、すぐ入力できる状態にする (VSCode と同じ感覚)
---   * クリックだけだと操作モードのままで、文字を打つと Vim のコマンドになってしまうため
---   * ドラッグでの範囲選択は今までどおり (選択中に離したときは何もしない)
---   * ツリー・ターミナル・読み取り専用のファイルには効かない
---   * やめたいときは、下の true を false にする
-vim.g.click_to_insert = true
+-- ファイルをクリックしたら、入力モードにするか (VSCode 風)。
+--   Vim を覚えるため、今は false (Vim と同じく、クリックはカーソルを動かすだけ)。
+--   true にすると、ファイルをクリックしたらすぐ入力できるようになる
+vim.g.click_to_insert = false
 -- ※全体 (グローバル) に割り当てると nvim のダブルクリック判定が乱れるので、
 --   普通のファイルのバッファにだけ割り当てる
 vim.api.nvim_create_autocmd("BufWinEnter", {
@@ -269,77 +271,83 @@ vim.api.nvim_create_autocmd("VimEnter", {
 
 -- ===== チートシート (<Space>k / :Cheatsheet) =====
 local cheatsheet = {
-  " 基本操作                              ",
-  "  i           文字を入力する (Esc で戻る)",
-  "  Ctrl-s / <Space>w  保存                ",
-  "  Tab         補完を確定 (薄い文字を確定)",
-  "  <Space>q    今のファイルを閉じる       ",
-  "  :qa         nvim を終了                ",
-  "  Alt-h/j/k/l 左/下/上/右の画面へ移動    ",
-  "  Ctrl-z / Ctrl-y  元に戻す / やり直す   ",
-  "  (操作モードでは u / Ctrl-r も可)       ",
-  "  dd / yy / p 行を 削除 / コピー / 貼付  ",
-  "  /文字 Enter 検索 (n で次、Esc で解除)  ",
+  " モード",
+  "  i / a          入力モード (カーソルの前 / 後から)",
+  "  o / O          下 / 上に行を足して入力",
+  "  Esc            通常モードに戻る",
+  "  v / V / Ctrl-v 選択 (文字 / 行 / 矩形)",
+  "  :              コマンド (:w 保存  :q 閉じる)",
   "",
-  " ファイル・検索                         ",
-  "  <Space>e    ファイルツリー 開閉        ",
-  "              (SSH 接続中は接続先のツリー)",
-  "  <Space>E    この PC のツリー           ",
-  "  (ツリー内) BS か u で上の階層へ        ",
-  "  (ツリー内) . で選んだフォルダをルートに",
-  "  <Space>..   作業ディレクトリを1つ上へ  ",
-  "  <Space>ff   ファイル名で探す           ",
-  "  <Space>fg   文字列で探す (grep)        ",
-  "  <Space>fb   開いているファイル一覧     ",
-  "  <Space>fc   テーマ切り替え             ",
-  "  -           フォルダをバッファで開く   ",
-  "  Shift-l/h   次/前のタブ                ",
+  " 移動",
+  "  h j k l        左 下 上 右",
+  "  w / b / e      次の単語 / 前の単語 / 単語の末尾",
+  "  0 / ^ / $      行頭 / 最初の文字 / 行末",
+  "  gg / G         先頭 / 末尾 (25G で 25 行目)",
+  "  Ctrl-d / Ctrl-u 半画面 下 / 上",
+  "  %              対応するカッコへ",
+  "  f{文字}        行内のその文字へ (; で次)",
+  "  Ctrl-o / Ctrl-i 移動の履歴を戻る / 進む",
   "",
-  " コード (LSP)                           ",
-  "  gd / gr     定義へ / 参照一覧          ",
-  "  K           説明を表示                 ",
-  "  <Space>rn   名前変更                   ",
-  "  <Space>ca   修正候補                   ",
-  "  <Space>cf   整形 (保存時にも自動)      ",
-  "  <Space>d    この行のエラーを詳しく表示 ",
-  "  ]d / [d     次 / 前のエラーへ移動      ",
-  "  <Space>xx   このファイルのエラー一覧   ",
-  "  gcc         行コメント切り替え         ",
+  " 編集",
+  "  x              1 文字削除",
+  "  dd / yy / p    行の削除 / コピー / 貼り付け",
+  "  dw / cw        単語を削除 / 書き換え",
+  "  ciw / ci\"      単語 / \"\" の中を書き換え",
+  "  u / Ctrl-r     元に戻す / やり直す",
+  "  .              直前の変更をくり返す",
+  "  > / <          インデント (選択中。くり返しは .)",
+  "  gcc / gc       コメント (行 / 選択中)",
+  "  (y と p は OS のクリップボードと共有)",
   "",
-  " ターミナル                             ",
-  "  F4          下のパネル 開閉 (中身は継続)",
-  "  <Space>tt   この PC のターミナル       ",
-  "  <Space>tn   ターミナルを追加 (Alt-n)   ",
-  "  <Space>tv   左右に分割して追加 (Alt-v) ",
-  "              (SSH 中なら同じホストに接続)",
-  "  Alt-x       今のターミナルを終了       ",
-  "  右の一覧    クリック/Enter で切替、x 終了",
-  "  <Space>tl   ターミナル一覧から選ぶ     ",
-  "  <Space>tc   Claude Code (この PC)      ",
-  "  Esc Esc     操作モードへ (シェルのみ)  ",
+  " 検索・置換",
+  "  /文字 Enter    検索 (n で次 / N で前)",
+  "  *              カーソルの単語を検索",
+  "  :%s/前/後/g    ファイル全体を置換",
   "",
-  " SSH                                    ",
-  "  <Space>ts   ホストを選んで接続         ",
-  "  <Space>tr   接続先で Claude Code       ",
-  "  exit        切断 (ツリーも元に戻る)    ",
-  "  (接続先ツリー) Enter 開く / BS 上へ    ",
-  "  (接続先ツリー) ? で操作一覧            ",
-  "  接続先のファイルは :w で接続先に保存   ",
+  " ファイル・画面",
+  "  :w / :q / :wq / :q!  保存 / 閉じる / 両方 / 破棄",
+  "  :e ファイル名  開く",
+  "  [b / ]b        前 / 次のファイル (上のタブ)",
+  "  Ctrl-w h/j/k/l 左 / 下 / 上 / 右の画面へ",
+  "  Ctrl-w s / v / q 横に分割 / 縦に分割 / 閉じる",
   "",
-  " 学校など制限のある環境                ",
-  "  :Offline    自動ダウンロードをしない   ",
-  "  :NoIcons    アイコン無し (□ になるとき)",
-  "  (どちらも再実行でオフ。再起動で反映)   ",
+  " 補完・コード (LSP)",
+  "  Ctrl-n / Ctrl-p 候補を選ぶ (入力中)",
+  "  Ctrl-y / Ctrl-e 確定 / やめる",
+  "  gd / K         定義へ / 説明を表示",
+  "  grr / grn / gra 参照一覧 / 名前変更 / 修正候補",
+  "  ]d / [d        次 / 前のエラーへ",
+  "  Ctrl-w d       エラーの詳細",
   "",
-  " 困ったら: <Space> を押して待つ / F1 でこの画面",
-  " (この画面は q か Esc で閉じる)",
+  " この設定で追加したキー (Vim では空いているキー)",
+  "  Space e        ファイルツリーへ / 閉じる",
+  "  Space ff / fg  ファイル名で探す / 文字列で探す",
+  "  Space fb / fr  開いているファイル / 最近のファイル",
+  "  Space w / q    保存 / 今のファイルを閉じる",
+  "  Space cf       整形",
+  "  Space xx       このファイルのエラー一覧",
+  "  F4             ターミナルへ / 隠す",
+  "  Space tt / tc  この PC のターミナル / Claude Code",
+  "  Space ts / tr  SSH 接続 / 接続先で Claude Code",
+  "  Alt-h/j/k/l    隣の画面へ (ターミナルの中からも)",
+  "",
+  " ターミナルの中",
+  "  Ctrl-\\ Ctrl-n  通常モードへ (シェルでは Esc Esc も可)",
+  "  i              入力に戻る",
+  "",
+  " 困ったら: Esc を押す / :help 調べたいこと / :Tutor (練習)",
+  " Space を押して待つと、次に押せるキーが出ます",
+  " (この画面は q か Esc で閉じる / Space k でまた開く)",
 }
 
 local function show_cheatsheet()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, cheatsheet)
   vim.bo[buf].modifiable = false
-  local w, h = 46, #cheatsheet
+  local w = 0
+  for _, l in ipairs(cheatsheet) do w = math.max(w, vim.fn.strdisplaywidth(l)) end
+  w = math.min(w + 2, vim.o.columns - 4)
+  local h = math.min(#cheatsheet, vim.o.lines - 4)
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor", width = w, height = h,
     row = math.floor((vim.o.lines - h) / 2), col = math.floor((vim.o.columns - w) / 2),
@@ -352,7 +360,7 @@ end
 
 vim.api.nvim_create_user_command("Cheatsheet", show_cheatsheet, {})
 map("n", "<leader>k", show_cheatsheet, { desc = "キー操作の一覧" })
-map("n", "<F1>", show_cheatsheet, { desc = "キー操作の一覧" })
+-- F1 は Vim と同じくヘルプ (:help) のまま
 
 -- ===== lazy.nvim ブートストラップ =====
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
@@ -405,10 +413,8 @@ require("lazy").setup({
         indicator = { style = "underline" },
       }),
     },
-    keys = {
-      { "<S-l>", "<cmd>BufferLineCycleNext<CR>", desc = "次のバッファ" },
-      { "<S-h>", "<cmd>BufferLineCyclePrev<CR>", desc = "前のバッファ" },
-    },
+    -- タブ (バッファ) の切り替えは nvim 標準の [b / ]b (:bprevious / :bnext)。
+    -- H / L は Vim 本来の動き (画面の上端 / 下端へ) のまま
   },
 
   -- コマンドライン/通知の UI 改善
@@ -461,7 +467,6 @@ require("lazy").setup({
         { "<leader>f", group = "検索 (find)" },
         { "<leader>t", group = "ターミナル / SSH / Claude" },
         { "<leader>c", group = "コード" },
-        { "<leader>r", group = "リネーム" },
         { "<leader>x", group = "エラー一覧" },
       },
     },
@@ -472,6 +477,7 @@ require("lazy").setup({
   -- ステータスライン
   {
     "nvim-lualine/lualine.nvim",
+    event = "VeryLazy", -- 画面が出た直後に読み込む (起動を待たせない)
     opts = {
       options = icons and { theme = "auto", globalstatus = true }
         or { theme = "auto", globalstatus = true, icons_enabled = false,
@@ -562,8 +568,8 @@ require("lazy").setup({
 
   -- ファイラ (バッファのように編集できる)
   {
-    "stevearc/oil.nvim", opts = {},
-    keys = { { "-", "<cmd>Oil<CR>", desc = "親ディレクトリを開く" } },
+    -- :Oil でフォルダをバッファとして開く (- は Vim 本来の「前の行の先頭へ」のまま)
+    "stevearc/oil.nvim", cmd = "Oil", opts = {},
   },
 
   -- ファジーファインダー (live_grep には ripgrep が必要)
@@ -597,24 +603,29 @@ require("lazy").setup({
       { "<leader>fb", "<cmd>Telescope buffers<CR>", desc = "バッファ" },
       { "<leader>fh", "<cmd>Telescope help_tags<CR>", desc = "ヘルプ" },
       { "<leader>fc", "<cmd>Telescope colorscheme enable_preview=true<CR>", desc = "テーマ切り替え" },
+      { "<leader>fr", "<cmd>Telescope oldfiles<CR>", desc = "最近のファイル" },
     },
   },
 
   -- Git
-  { "lewis6991/gitsigns.nvim", opts = {} },
+  { "lewis6991/gitsigns.nvim", event = { "BufReadPre", "BufNewFile" }, opts = {} },
 
   -- 編集補助
   { "windwp/nvim-autopairs", event = "InsertEnter", opts = {} },
-  { "numToStr/Comment.nvim", opts = {} }, -- gcc / gc
+  -- コメントの gcc / gc は nvim 標準の機能を使う (プラグイン不要)
   { "kylechui/nvim-surround", event = "VeryLazy", opts = {} },
-  { "lukas-reineke/indent-blankline.nvim", main = "ibl", opts = {} },
+  { "lukas-reineke/indent-blankline.nvim", main = "ibl", event = { "BufReadPost", "BufNewFile" }, opts = {} },
 
   -- LSP (Mason でサーバーを自動導入)
+  --   起動を速くするため、ファイルを開いたとき (または :Mason を使ったとき) に読み込む
   {
-    "williamboman/mason.nvim", opts = {},
+    "williamboman/mason.nvim",
+    cmd = { "Mason", "MasonInstall", "MasonUninstall", "MasonUpdate", "MasonLog" },
+    opts = {},
   },
   {
     "williamboman/mason-lspconfig.nvim",
+    event = { "BufReadPre", "BufNewFile" },
     dependencies = { "williamboman/mason.nvim", "neovim/nvim-lspconfig" },
     opts = {
       -- offline のときは自動導入しない (入れたいものは :Mason から手動で)
@@ -636,11 +647,16 @@ require("lazy").setup({
   -- フォーマッタ / ツールの自動導入
   {
     "WhoIsSethDaniel/mason-tool-installer.nvim",
+    -- 足りないツールの確認は、起動して少したってから、7日に1回だけ行う (下の「ツールの自動導入」)
+    -- offline のときは読み込まない。手動での確認は :MasonToolsInstall
+    lazy = true,
+    cmd = { "MasonToolsInstall", "MasonToolsUpdate" },
+    enabled = not offline,
     dependencies = { "williamboman/mason.nvim" },
     opts = {
-      ensure_installed = offline and {}
-        or { "prettier", "stylua", "tree-sitter-cli", "goimports", "gofumpt", "shfmt" },
-      run_on_start = not offline,
+      ensure_installed = { "prettier", "stylua", "tree-sitter-cli", "goimports", "gofumpt", "shfmt" },
+      run_on_start = true,
+      start_delay = 3000,
     },
   },
 
@@ -704,24 +720,33 @@ require("lazy").setup({
       local mason_ts = vim.fn.stdpath("data") .. "/mason/bin/tree-sitter" .. (vim.fn.has("win32") == 1 and ".cmd" or "")
       local has_ts = vim.fn.executable("tree-sitter") == 1 or vim.uv.fs_stat(mason_ts) ~= nil
       if offline or not has_cc or not has_ts then return end
-      local ok, ts = pcall(require, "nvim-treesitter")
-      if not ok then return end
-      ts.install({
-        "c", "cpp", "javascript", "typescript", "tsx", "astro", "html", "css",
-        "json", "python", "lua", "markdown", "markdown_inline",
-        "go", "gomod", "gosum", "rust", "bash", "yaml", "toml", "dockerfile",
-        "scss", "vim", "vimdoc", "query", "regex", "diff", "gitcommit",
-      })
+      -- 足りないパーサーだけを、起動が落ち着いてから入れる (毎回すべてを確認しない)
+      vim.defer_fn(function()
+        local ok, ts = pcall(require, "nvim-treesitter")
+        if not ok then return end
+        local want = {
+          "c", "cpp", "javascript", "typescript", "tsx", "astro", "html", "css",
+          "json", "python", "lua", "markdown", "markdown_inline",
+          "go", "gomod", "gosum", "rust", "bash", "yaml", "toml", "dockerfile",
+          "scss", "vim", "vimdoc", "query", "regex", "diff", "gitcommit",
+        }
+        local have = {}
+        for _, lang in ipairs(ts.get_installed and ts.get_installed() or {}) do have[lang] = true end
+        local missing = vim.tbl_filter(function(lang) return not have[lang] end, want)
+        if #missing > 0 then ts.install(missing) end
+      end, 2000)
     end,
   },
 
   -- 補完
   {
+    -- ※遅延読み込みはしない (入力を始めたときに読み込むと、最初に打った文字で候補が出ない。
+    --   blink.cmp は自分で必要なときだけ動くので、公式も遅延読み込みは不要としている)
     "saghen/blink.cmp", version = "1.*",
     opts = {
-      -- VSCode と同じく Tab で補完を確定 (Tab/Shift-Tab で候補を移動、Enter は普通の改行)
-      -- 候補が出ていないときの Tab は普通のインデント
-      keymap = { preset = "super-tab" },
+      -- Vim 本来の補完と同じキー: Ctrl-n / Ctrl-p で選ぶ、Ctrl-y で確定、Ctrl-e でやめる
+      -- (Tab と Enter は普通の文字入力のまま)
+      keymap = { preset = "default" },
       -- 選んでいる候補の残りをカーソルの後ろに薄く表示 (例: #include <stdi → o.h> が薄く出る)
       -- no-icons のときは、候補一覧の種類アイコンの代わりに種類名 (Function など) を出す
       completion = vim.tbl_extend("force", { ghost_text = { enabled = true } }, icons and {} or {
@@ -740,12 +765,30 @@ require("lazy").setup({
   checker = { enabled = false },
   -- luarocks は使わない (有効だと hererocks の取得を試みて、プロキシ環境で失敗・停止する)
   rocks = { enabled = false },
+  -- nvim 付属の、使っていない機能は読み込まない (起動を速くする)
+  --   netrw はファイルツリー (neo-tree / oil) で置き換え済み。gzip / tar / zip は圧縮ファイルの中身を見る機能
+  performance = {
+    rtp = { disabled_plugins = { "gzip", "netrwPlugin", "tarPlugin", "tohtml", "zipPlugin" } },
+  },
   -- no-icons のときは、:Lazy の画面のアイコンを絵文字にする (lazy.nvim 公式の例)
   ui = { icons = icons and {} or {
     cmd = "⌘", config = "🛠", event = "📅", ft = "📂", init = "⚙", keys = "🗝", plugin = "🔌",
     runtime = "💻", require = "🌙", source = "📄", start = "🚀", task = "📌", lazy = "💤 ",
   } },
 })
+
+-- ===== ツールの自動導入 (整形ツールなど) =====
+-- 起動直後は重くなるので、起動から 8 秒後に、前回の確認から 7 日以上たっているときだけ確認する
+if not offline then
+  vim.defer_fn(function()
+    local stamp = vim.fn.stdpath("state") .. "/mason-tools-checked"
+    local st = vim.uv.fs_stat(stamp)
+    if st and os.time() - st.mtime.sec < 7 * 24 * 3600 then return end
+    local f = io.open(stamp, "w")
+    if f then f:close() end
+    pcall(require("lazy").load, { plugins = { "mason-tool-installer.nvim" } })
+  end, 8000)
+end
 
 -- ===== :Offline / :NoIcons (スイッチの切り替え。次回起動から反映) =====
 local function toggle_flag(name, label)
@@ -789,7 +832,9 @@ vim.diagnostic.config({
     format = function(d) return diag_ja.text(d.message) end,
   },
   severity_sort = true, -- 同じ行に複数あるときはエラーを優先して表示
-  -- <Space>d の詳細表示: 日本語と、元の英語の両方を出す (どのツールの指摘かも出す)
+  -- 入力中もエラーを表示し、打つたびに更新する (nvim の標準では、入力中は隠して Esc の後に出す)
+  update_in_insert = true,
+  -- Ctrl-w d の詳細表示: 日本語と、元の英語の両方を出す (どのツールの指摘かも出す)
   float = {
     border = "rounded",
     source = true,
@@ -820,16 +865,12 @@ vim.lsp.config("ts_ls", { init_options = { locale = "ja" } })
 vim.lsp.config("lua_ls", { cmd = { "lua-language-server", "--locale=ja-jp" } })
 
 -- ===== LSP キーマップ =====
+-- nvim 標準のキーをそのまま使う (設定不要で最初から使える):
+--   K 説明 / grr 参照一覧 / grn 名前変更 / gra 修正候補 / gri 実装へ / gO 記号の一覧
+--   ]d [d 次/前のエラー / Ctrl-w d エラーの詳細 / 入力中 Ctrl-s 引数の説明
+-- 追加するのは gd (定義へ) だけ。Vim 本来の gd (関数内の宣言へ) を、LSP の正確な定義ジャンプに置き換える
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(ev)
-    local function m(lhs, rhs, desc)
-      map("n", lhs, rhs, { buffer = ev.buf, desc = desc })
-    end
-    m("gd", vim.lsp.buf.definition, "定義へ")
-    m("gr", vim.lsp.buf.references, "参照")
-    m("K", vim.lsp.buf.hover, "ホバー")
-    m("<leader>rn", vim.lsp.buf.rename, "リネーム")
-    m("<leader>ca", vim.lsp.buf.code_action, "コードアクション")
-    m("<leader>d", vim.diagnostic.open_float, "診断を表示")
+    map("n", "gd", vim.lsp.buf.definition, { buffer = ev.buf, desc = "定義へ" })
   end,
 })

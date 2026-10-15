@@ -14,12 +14,65 @@ local I = vim.g.have_nerd_font == false and { pc = ">", server = "@", claude = "
 
 -- この PC のシェル。Windows は PowerShell 7 (無ければ Windows PowerShell)、Linux / macOS は $SHELL
 local is_windows = vim.fn.has("win32") == 1
-if is_windows then
-  M.shell_cmd = vim.fn.executable("pwsh") == 1 and { "pwsh", "-NoLogo" } or { "powershell", "-NoLogo" }
-else
-  M.shell_cmd = { vim.env.SHELL ~= nil and vim.env.SHELL ~= "" and vim.env.SHELL or "sh" }
+
+-- PowerShell 7 (pwsh) の実行ファイルを探す。
+--   Microsoft Store 版は「アプリ実行エイリアス」という特殊な形で入っていて、nvim の executable() や
+--   ターミナル (jobstart) からはエイリアスのままでは起動できない。
+--   そこで pwsh 自身に本体の場所 (C:\Program Files\WindowsApps\Microsoft.PowerShell_<版>\pwsh.exe) を聞いて使う。
+--   本体の場所は PowerShell の更新で変わるので、覚えておき、使えなくなったら聞き直す。
+--   調べるのはターミナルを最初に開くときだけ (nvim の起動は遅くしない)
+local pwsh_cache = vim.fn.stdpath("state") .. "/pwsh-path"
+local function find_pwsh()
+  if vim.fn.executable("pwsh") == 1 then return "pwsh" end
+  local installed = (vim.env.ProgramFiles or "C:\\Program Files") .. "\\PowerShell\\7\\pwsh.exe"
+  if vim.fn.executable(installed) == 1 then return installed end
+  local f = io.open(pwsh_cache, "r")
+  if f then
+    local p = f:read("*l")
+    f:close()
+    if p and vim.fn.executable(p) == 1 then return p end
+  end
+  if not vim.uv.fs_lstat((vim.env.LOCALAPPDATA or "") .. "\\Microsoft\\WindowsApps\\pwsh.exe") then return nil end
+  local ok, r = pcall(function()
+    return vim.system({ "pwsh", "-NoLogo", "-NoProfile", "-Command", "[Environment]::ProcessPath" }, { text = true }):wait(8000)
+  end)
+  local p = ok and r and r.code == 0 and vim.trim(r.stdout or "") or ""
+  if p ~= "" and vim.fn.executable(p) == 1 then
+    local w = io.open(pwsh_cache, "w")
+    if w then w:write(p) w:close() end
+    return p
+  end
 end
-M.shell_name = vim.fn.fnamemodify(M.shell_cmd[1], ":t:r")
+
+-- Windows PowerShell 5.1 用の環境変数。
+--   PowerShell 7 から起動された nvim では、モジュールの置き場所 (PSModulePath) に 7 用の場所が入っていて、
+--   5.1 がそこの PSReadLine (7 用) を読もうとして「PSReadline モジュールを読み込めません」となるので外す
+local function ps51_env()
+  local keep = {}
+  for _, p in ipairs(vim.split(vim.env.PSModulePath or "", ";", { trimempty = true })) do
+    local l = p:lower()
+    local for_ps7 = (l:find("\\powershell\\", 1, true) and not l:find("windowspowershell", 1, true))
+      or l:find("microsoft.powershell_", 1, true)
+    if not for_ps7 then table.insert(keep, p) end
+  end
+  return { PSModulePath = table.concat(keep, ";") }
+end
+
+-- この PC のシェルの起動コマンド (初めて使うときに決める)
+local shell_cmd
+function M.shell_cmd()
+  if shell_cmd and vim.fn.executable(shell_cmd[1]) == 1 then return shell_cmd end
+  if is_windows then
+    local pwsh = find_pwsh()
+    shell_cmd = pwsh and { pwsh, "-NoLogo" } or { "powershell", "-NoLogo" }
+  else
+    shell_cmd = { vim.env.SHELL ~= nil and vim.env.SHELL ~= "" and vim.env.SHELL or "sh" }
+  end
+  return shell_cmd
+end
+function M.shell_name()
+  return vim.fn.fnamemodify(M.shell_cmd()[1], ":t:r")
+end
 M.last = nil -- 最後に使っていたターミナル
 M.local_shell = nil
 M.order = {} -- 一覧に並べる順 (開いた順)
@@ -198,12 +251,15 @@ end
 function M.run(cmd, opts)
   opts = opts or {}
   if type(cmd) == "string" then
-    cmd = vim.list_extend(vim.deepcopy(M.shell_cmd), { is_windows and "-Command" or "-c", cmd })
+    cmd = vim.list_extend(vim.deepcopy(M.shell_cmd()), { is_windows and "-Command" or "-c", cmd })
   end
   local buf = api.nvim_create_buf(false, false) -- タブ一覧には出さない
   for k, v in pairs(opts.vars or {}) do vim.b[buf][k] = v end
   M.show(buf, opts.split)
-  vim.fn.jobstart(cmd, { term = true, cwd = opts.cwd })
+  -- Windows PowerShell 5.1 で起動するときは、7 用のモジュールの場所を外す (PSReadLine のエラー防止)
+  local exe = vim.fn.fnamemodify(cmd[1], ":t"):lower()
+  local env = (exe == "powershell" or exe == "powershell.exe") and ps51_env() or nil
+  vim.fn.jobstart(cmd, { term = true, cwd = opts.cwd, env = env })
   vim.bo[buf].bufhidden = "hide"
   if opts.esc ~= false then
     vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = buf, desc = "ターミナル → 操作モード" })
@@ -225,7 +281,7 @@ end
 -- この PC のシェル (1つを使い回す)
 function M.shell()
   if alive(M.local_shell) then return M.show(M.local_shell) end
-  M.local_shell = M.run(M.shell_cmd, { vars = { term_label = M.shell_name, autoclose = true } })
+  M.local_shell = M.run(M.shell_cmd(), { vars = { term_label = M.shell_name(), autoclose = true } })
 end
 
 -- 追加 / 分割: 今のターミナルと同じ種類で開く
@@ -237,13 +293,20 @@ function M.new_like(split, src)
   if is_term(src) and vim.b[src].remote_target then
     return require("user.remote").connect(vim.b[src].remote_target, { cwd = vim.b[src].remote_cwd, split = split })
   end
-  return M.run(M.shell_cmd, { split = split, vars = { term_label = M.shell_name, autoclose = true } })
+  return M.run(M.shell_cmd(), { split = split, vars = { term_label = M.shell_name(), autoclose = true } })
 end
 
 -- F4: パネルの開閉。隠したときに並んでいたターミナルを、そのまま並べて戻す
+--   キーボードだけで使えるよう、見えているが別の場所 (エディタなど) にいるときは、隠さずにターミナルへ移動する
 function M.toggle()
   local tw = M.term_wins()
   if #tw > 0 then
+    local curwin = api.nvim_get_current_win()
+    if not vim.tbl_contains(tw, curwin) and curwin ~= list_win() then
+      api.nvim_set_current_win(win_of(M.last) or tw[1])
+      vim.cmd("startinsert")
+      return
+    end
     local cur = api.nvim_get_current_buf()
     if is_term(cur) then M.last = cur end
     M.hidden = vim.tbl_map(api.nvim_win_get_buf, tw)

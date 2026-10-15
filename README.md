@@ -7,7 +7,14 @@ Neovim 0.12 以上向けの設定 (lazy.nvim)。Windows と Linux で使えま�
 - `lua/user/remote.lua` — SSH 接続先のファイルツリーと編集
 - `lazy-lock.json` — プラグインのバージョン固定
 
-キー操作は nvim 内で `F1` (または `<Space>k`) を押すと一覧が出ます。
+キー操作は Vim / nvim の標準のままです (Vim を覚えられるように、標準のキーは変えていません)。
+追加の機能は、Vim では空いているキー (`Space` から始まるもの、`F4`、`Alt-h/j/k/l`) にだけ割り当てています。
+nvim 内で `Space k` を押すと一覧が出ます。Vim の練習は `:Tutor` です。
+
+`vim` と打っても nvim が起動するようにするには:
+
+- Windows (PowerShell): プロファイル (`notepad $PROFILE`) に `Set-Alias vim nvim` と `Set-Alias vi nvim` を書く
+- Linux: `~/.bashrc` に `alias vim=nvim` と `alias vi=nvim` を書いて `source ~/.bashrc`
 
 ## セットアップ (Windows)
 

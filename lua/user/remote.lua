@@ -494,14 +494,27 @@ function M.detach()
 end
 
 -- <Space>e : 接続中なら接続先ツリー、そうでなければ手元のツリーを開閉
+-- キーボードだけで使えるよう、VSCode の Ctrl+Shift+E と同じ動きにする
+--   見えていない → 開いて移動 / 見えているが別の場所にいる → 移動 / ツリーにいる → 閉じる
 function M.toggle_tree()
-  if tree_win() then return M.hide() end
+  local cur = api.nvim_get_current_win()
+  local rw = tree_win()
+  if rw then
+    if cur ~= rw then return api.nvim_set_current_win(rw) end
+    return M.hide()
+  end
   if state.target then
-    M.show()
+    api.nvim_set_current_win(M.show())
     if not state.cwd then M.open_dir(nil) end
     return
   end
-  vim.cmd("Neotree toggle")
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if vim.bo[api.nvim_win_get_buf(w)].filetype == "neo-tree" then
+      if cur ~= w then return api.nvim_set_current_win(w) end
+      return vim.cmd("Neotree close")
+    end
+  end
+  vim.cmd("Neotree focus") -- 閉じていれば開いて移動
 end
 
 -- ===== SSH 接続 =====
