@@ -797,21 +797,16 @@ require("lazy").setup({
     end,
   },
 
+  -- スニペット集 (多くの言語のひな形)。中身のファイルを blink.cmp が直接読むので、プラグインとしては読み込まない。
+  --   入っていなくても動く (offline のときは自動では取得しない。プロキシを設定して :Lazy install で入る)。
+  --   C / C++ / Python は、この設定の snippets/ フォルダに日本語の説明つきのものがあり、そちらを使う
+  { "rafamadriz/friendly-snippets", lazy = true },
+
   -- 補完
   {
     -- ※遅延読み込みはしない (入力を始めたときに読み込むと、最初に打った文字で候補が出ない。
     --   blink.cmp は自分で必要なときだけ動くので、公式も遅延読み込みは不要としている)
     "saghen/blink.cmp", version = "1.*",
-    -- スニペット集 (多くの言語のひな形)。オフラインで未導入のときは、取得を試みない
-    --   (C / C++ / Python は、この設定の snippets/ フォルダに日本語の説明つきのものがあり、そちらを使う)
-    dependencies = {
-      {
-        "rafamadriz/friendly-snippets",
-        enabled = function()
-          return not offline or vim.uv.fs_stat(vim.fn.stdpath("data") .. "/lazy/friendly-snippets") ~= nil
-        end,
-      },
-    },
     opts = {
       -- Vim 本来の補完と同じキー: Ctrl-n / Ctrl-p で選ぶ、Ctrl-y で確定、Ctrl-e でやめる
       -- (Tab と Enter は普通の文字入力のまま)
@@ -874,6 +869,12 @@ require("lazy").setup({
             -- 「変数.」の後や #include の行では、ひな形は出さない
             should_show_items = function(ctx) return not require("user.offline_cmp").exclusive(ctx, "snippets") end,
             opts = {
+              -- 読み込む場所: この設定の snippets/ と、friendly-snippets (入っていれば)
+              friendly_snippets = false,
+              search_paths = vim.tbl_filter(function(dir) return vim.uv.fs_stat(dir) ~= nil end, {
+                vim.fn.stdpath("config") .. "/snippets",
+                vim.fn.stdpath("data") .. "/lazy/friendly-snippets",
+              }),
               -- この設定に日本語のスニペットがある言語は、friendly-snippets の同じ言語のものを出さない (重複を防ぐ)
               filter_snippets = function(ft, file)
                 if not tostring(file):find("friendly%-snippets") then return true end
