@@ -219,6 +219,18 @@ vim.api.nvim_create_autocmd("TextYankPost", {
   callback = function() vim.hl.on_yank() end,
 })
 
+-- ファイルを開いたら、前回閉じたときのカーソル位置に戻る (Vim の説明書 :help last-position-jump の設定)
+vim.api.nvim_create_autocmd("BufReadPost", {
+  callback = function(ev)
+    local ft = vim.bo[ev.buf].filetype
+    if ft == "gitcommit" or ft == "gitrebase" or vim.bo[ev.buf].buftype ~= "" then return end
+    local pos = vim.api.nvim_buf_get_mark(ev.buf, '"')
+    if pos[1] > 1 and pos[1] <= vim.api.nvim_buf_line_count(ev.buf) then
+      pcall(vim.api.nvim_win_set_cursor, 0, pos)
+    end
+  end,
+})
+
 -- ===== ターミナル / SSH / Claude Code =====
 -- 実装は lua/user/terminal.lua (下のパネル) と lua/user/remote.lua (接続先ツリー)
 local term = require("user.terminal")
@@ -261,6 +273,14 @@ vim.api.nvim_create_user_command("Claude", function(a)
   term.run(vim.list_extend({ "claude" }, a.fargs),
     { esc = false, vars = { term_label = "Claude Code (この PC)", is_claude = true, autoclose = true } })
 end, { nargs = "*" })
+
+-- ===== 実行 / オフライン補完 / 環境の確認 =====
+-- <Space>r と :Run で今のファイルを実行 (lua/user/run.lua)
+require("user.run").setup()
+-- LSP が無い環境での、引数の表示と K の説明 (lua/user/offline_cmp.lua。補完の一覧への組み込みは下の blink.cmp)
+require("user.offline_cmp").setup()
+-- :EnvCheck で、この PC で使える機能の一覧 (lua/user/doctor.lua)
+require("user.doctor").setup()
 
 -- 引数なしで起動したら、ファイルツリーを開く
 vim.api.nvim_create_autocmd("VimEnter", {
@@ -314,6 +334,9 @@ local cheatsheet = {
   " 補完・コード (LSP)",
   "  Ctrl-n / Ctrl-p 候補を選ぶ (入力中)",
   "  Ctrl-y / Ctrl-e 確定 / やめる",
+  "  Ctrl-Space     候補を出す / 候補の説明を出す・消す",
+  "  Tab / Shift-Tab ひな形 (スニペット) の次 / 前の入力欄へ",
+  "  (LSP が無くても、C / C++ / Python は辞書で補完できます)",
   "  gd / K         定義へ / 説明を表示",
   "  grr / grn / gra 参照一覧 / 名前変更 / 修正候補",
   "  ]d / [d        次 / 前のエラーへ",
@@ -323,9 +346,15 @@ local cheatsheet = {
   "  Space e        ファイルツリーへ / 閉じる",
   "  Space ff / fg  ファイル名で探す / 文字列で探す",
   "  Space fb / fr  開いているファイル / 最近のファイル",
+  "  Space f/ / fw  このファイル内を探す / カーソルの単語を探す",
+  "  Space fs / fd  関数などの一覧 / エラーを探す",
   "  Space w / q    保存 / 今のファイルを閉じる",
+  "  Space r / R    今のファイルを実行 / もう一度実行",
   "  Space cf       整形",
   "  Space xx       このファイルのエラー一覧",
+  "  ]h / [h        次 / 前の変更箇所へ (git)",
+  "  Space gp / gr  変更箇所の差分を見る / 元に戻す (git)",
+  "  Space gb / gd  その行を誰がいつ変えたか / 差分 (git)",
   "  F4             ターミナルへ / 隠す",
   "  Space tt / tc  この PC のターミナル / Claude Code",
   "  Space ts / tr  SSH 接続 / 接続先で Claude Code",
@@ -336,6 +365,7 @@ local cheatsheet = {
   "  i              入力に戻る",
   "",
   " 困ったら: Esc を押す / :help 調べたいこと / :Tutor (練習)",
+  " :EnvCheck で、この PC で使える機能を確認できます",
   " Space を押して待つと、次に押せるキーが出ます",
   " (この画面は q か Esc で閉じる / Space k でまた開く)",
 }
@@ -468,6 +498,7 @@ require("lazy").setup({
         { "<leader>t", group = "ターミナル / SSH / Claude" },
         { "<leader>c", group = "コード" },
         { "<leader>x", group = "エラー一覧" },
+        { "<leader>g", group = "git (変更箇所)" },
       },
     },
     keys = { { "<leader>?", function() require("which-key").show({ global = false }) end, desc = "このバッファのキー一覧" } },
@@ -604,11 +635,39 @@ require("lazy").setup({
       { "<leader>fh", "<cmd>Telescope help_tags<CR>", desc = "ヘルプ" },
       { "<leader>fc", "<cmd>Telescope colorscheme enable_preview=true<CR>", desc = "テーマ切り替え" },
       { "<leader>fr", "<cmd>Telescope oldfiles<CR>", desc = "最近のファイル" },
+      { "<leader>f/", "<cmd>Telescope current_buffer_fuzzy_find<CR>", desc = "このファイル内を探す" },
+      { "<leader>fw", "<cmd>Telescope grep_string<CR>", desc = "カーソルの単語を探す" },
+      { "<leader>fd", "<cmd>Telescope diagnostics<CR>", desc = "エラーを探す" },
+      { "<leader>fk", "<cmd>Telescope keymaps<CR>", desc = "キーの割り当てを探す" },
+      { "<leader>fs", function()
+        -- LSP があれば正確な一覧、無ければ treesitter (構文解析) の一覧
+        local b = require("telescope.builtin")
+        if #vim.lsp.get_clients({ bufnr = 0, method = "textDocument/documentSymbol" }) > 0 then
+          b.lsp_document_symbols()
+        else
+          b.treesitter()
+        end
+      end, desc = "関数などの一覧" },
     },
   },
 
   -- Git
-  { "lewis6991/gitsigns.nvim", event = { "BufReadPre", "BufNewFile" }, opts = {} },
+  --   変更箇所の移動は ]h / [h (Vim では空いているキー。]c / [c は Vim 本来の「差分表示での移動」のまま)
+  {
+    "lewis6991/gitsigns.nvim", event = { "BufReadPre", "BufNewFile" },
+    opts = {
+      on_attach = function(buf)
+        local gs = require("gitsigns")
+        local function m(lhs, rhs, desc) vim.keymap.set("n", lhs, rhs, { buffer = buf, desc = desc }) end
+        m("]h", function() gs.nav_hunk("next") end, "次の変更箇所へ")
+        m("[h", function() gs.nav_hunk("prev") end, "前の変更箇所へ")
+        m("<leader>gp", gs.preview_hunk, "変更箇所の差分を見る")
+        m("<leader>gr", gs.reset_hunk, "変更箇所を元に戻す")
+        m("<leader>gb", function() gs.blame_line({ full = true }) end, "この行を誰がいつ変えたか")
+        m("<leader>gd", gs.diffthis, "保存済みの内容との差分")
+      end,
+    },
+  },
 
   -- 編集補助
   { "windwp/nvim-autopairs", event = "InsertEnter", opts = {} },
@@ -743,26 +802,93 @@ require("lazy").setup({
     -- ※遅延読み込みはしない (入力を始めたときに読み込むと、最初に打った文字で候補が出ない。
     --   blink.cmp は自分で必要なときだけ動くので、公式も遅延読み込みは不要としている)
     "saghen/blink.cmp", version = "1.*",
+    -- スニペット集 (多くの言語のひな形)。オフラインで未導入のときは、取得を試みない
+    --   (C / C++ / Python は、この設定の snippets/ フォルダに日本語の説明つきのものがあり、そちらを使う)
+    dependencies = {
+      {
+        "rafamadriz/friendly-snippets",
+        enabled = function()
+          return not offline or vim.uv.fs_stat(vim.fn.stdpath("data") .. "/lazy/friendly-snippets") ~= nil
+        end,
+      },
+    },
     opts = {
       -- Vim 本来の補完と同じキー: Ctrl-n / Ctrl-p で選ぶ、Ctrl-y で確定、Ctrl-e でやめる
       -- (Tab と Enter は普通の文字入力のまま)
       keymap = { preset = "default" },
       -- 選んでいる候補の残りをカーソルの後ろに薄く表示 (例: #include <stdi → o.h> が薄く出る)
       -- no-icons のときは、候補一覧の種類アイコンの代わりに種類名 (Function など) を出す
-      completion = vim.tbl_extend("force", { ghost_text = { enabled = true } }, icons and {} or {
+      -- 候補を選ぶと、横に説明 (引数・使い方) を自動で表示する
+      completion = vim.tbl_extend("force", {
+        ghost_text = { enabled = true },
+        documentation = { auto_show = true, auto_show_delay_ms = 200, window = { border = "rounded" } },
+      }, icons and {} or {
         menu = { draw = { columns = { { "label", "label_description", gap = 1 }, { "kind" } } } },
       }),
+      -- 関数名( を打つと、引数の一覧を表示する (LSP があるとき。無いときは lua/user/offline_cmp.lua が表示する)
+      signature = { enabled = true, window = { border = "rounded" } },
       -- 候補の絞り込みは Rust 版 (完成品を自動ダウンロード。ビルド不要)。取得できない環境では Lua 版で動く
       -- ※Lua 版は、候補が出た後に "o.h" のように素早く打つと絞り込みが追いつかず、
       --   #include <stdio.h で Tab を押すと stdint.h が入ることがある
       -- offline のときはダウンロードを試みず、最初から Lua 版を使う (起動のたびの失敗・警告を防ぐ)
       fuzzy = offline and { implementation = "lua", prebuilt_binaries = { download = false } }
         or { implementation = "prefer_rust" },
-      sources = { default = { "lsp", "path", "buffer" } },
+      -- 候補の出どころ:
+      --   lsp      言語サーバー (入っていれば、これが一番正確)
+      --   offline  辞書と自分のコード (LSP が無い C / C++ / Python で使う。lua/user/offline_cmp.lua)
+      --   snippets ひな形 (for, main など。snippets/ フォルダと friendly-snippets)
+      --   path     ファイル名
+      --   buffer   開いているファイルにある単語
+      sources = {
+        default = { "lsp", "offline", "snippets", "path", "buffer" },
+        providers = {
+          offline = {
+            name = "辞書",
+            module = "user.offline_cmp",
+            score_offset = 0,
+            enabled = function() return require("user.offline_cmp").active(0) end,
+          },
+          lsp = { fallbacks = {} },
+          buffer = {
+            -- LSP が補完を出せるファイルでは、LSP の候補だけを出す (単語の候補で埋もれないように)
+            enabled = function()
+              for _, c in ipairs(vim.lsp.get_clients({ bufnr = 0 })) do
+                if c.server_capabilities and c.server_capabilities.completionProvider then return false end
+              end
+              return true
+            end,
+            -- 「変数.」「#include <」の後など、辞書が答えを知っている場所では出さない。辞書と同じ単語も出さない
+            should_show_items = function(ctx) return not require("user.offline_cmp").exclusive(ctx, "buffer") end,
+            transform_items = function(ctx, items) return require("user.offline_cmp").dedupe_words(ctx, items) end,
+            opts = {
+              -- 画面に出ているファイルだけでなく、開いているファイルすべての単語を候補にする
+              get_bufnrs = function()
+                return vim.tbl_filter(function(b)
+                  return vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buflisted and vim.bo[b].buftype == ""
+                end, vim.api.nvim_list_bufs())
+              end,
+            },
+          },
+          snippets = {
+            score_offset = 0, -- 標準は -1。for と打ったら for のひな形が上に来るようにする
+            -- 「変数.」の後や #include の行では、ひな形は出さない
+            should_show_items = function(ctx) return not require("user.offline_cmp").exclusive(ctx, "snippets") end,
+            opts = {
+              -- この設定に日本語のスニペットがある言語は、friendly-snippets の同じ言語のものを出さない (重複を防ぐ)
+              filter_snippets = function(ft, file)
+                if not tostring(file):find("friendly%-snippets") then return true end
+                return vim.uv.fs_stat(vim.fn.stdpath("config") .. "/snippets/" .. ft .. ".json") == nil
+              end,
+            },
+          },
+        },
+      },
     },
   },
 }, {
   checker = { enabled = false },
+  -- offline のときは、入っていないプラグインの取得を起動のたびに試みない (失敗と待ちを防ぐ)
+  install = { missing = not offline },
   -- luarocks は使わない (有効だと hererocks の取得を試みて、プロキシ環境で失敗・停止する)
   rocks = { enabled = false },
   -- nvim 付属の、使っていない機能は読み込まない (起動を速くする)
@@ -818,6 +944,20 @@ end
 -- Mason 以外で入れた clangd (学校の PC で、ホームに置いて PATH を通した場合など) も使う。
 -- Mason で入れたものと同じ設定が使われるので、二重には起動しない
 if vim.fn.executable("clangd") == 1 then vim.lsp.enable("clangd") end
+-- ほかの言語サーバーも同じく、PC に入っていれば (PATH が通っていれば) 使う。
+--   オフラインで Mason が使えなくても、OS のパッケージや pip / npm で入れたものがそのまま動く
+for name, cmd in pairs({
+  pyright = "pyright-langserver", basedpyright = "basedpyright-langserver",
+  gopls = "gopls", rust_analyzer = "rust-analyzer", lua_ls = "lua-language-server",
+  ts_ls = "typescript-language-server", bashls = "bash-language-server",
+}) do
+  if vim.fn.executable(cmd) == 1 then vim.lsp.enable(name) end
+end
+-- pylsp は、pyright が無いときだけ (両方動くと、候補が二重に出る)
+if vim.fn.executable("pylsp") == 1 and vim.fn.executable("pyright-langserver") == 0
+  and vim.fn.executable("basedpyright-langserver") == 0 then
+  vim.lsp.enable("pylsp")
+end
 -- clangd が無い環境では、gcc でエラーを調べて表示する (lua/user/c_check.lua)
 require("user.c_check").setup()
 

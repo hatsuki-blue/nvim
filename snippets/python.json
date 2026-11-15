@@ -1,0 +1,226 @@
+{
+  "main": {
+    "prefix": "main",
+    "description": "直接実行されたときだけ動かす (ひな形)",
+    "body": [
+      "def main():",
+      "\t${1:pass}",
+      "",
+      "",
+      "if __name__ == \"__main__\":",
+      "\tmain()"
+    ]
+  },
+  "ifmain": {
+    "prefix": "ifmain",
+    "description": "if __name__ == \"__main__\":",
+    "body": [
+      "if __name__ == \"__main__\":",
+      "\t${0:main()}"
+    ]
+  },
+  "def": {
+    "prefix": "def",
+    "description": "関数の定義",
+    "body": [
+      "def ${1:name}(${2}):",
+      "\t${0:pass}"
+    ]
+  },
+  "class": {
+    "prefix": "class",
+    "description": "クラス",
+    "body": [
+      "class ${1:Name}:",
+      "\tdef __init__(self${2}):",
+      "\t\t${0:pass}"
+    ]
+  },
+  "メソッド": {
+    "prefix": "defs",
+    "description": "メソッドの定義 (self つき)",
+    "body": [
+      "def ${1:name}(self${2}):",
+      "\t${0:pass}"
+    ]
+  },
+  "for range": {
+    "prefix": "for",
+    "description": "for 文 (0 から n-1 まで)",
+    "body": [
+      "for ${1:i} in range(${2:n}):",
+      "\t${0:pass}"
+    ]
+  },
+  "for in": {
+    "prefix": "forin",
+    "description": "for 文 (すべての要素)",
+    "body": [
+      "for ${1:x} in ${2:items}:",
+      "\t${0:pass}"
+    ]
+  },
+  "for enumerate": {
+    "prefix": "fore",
+    "description": "for 文 (番号つき)",
+    "body": [
+      "for ${1:i}, ${2:x} in enumerate(${3:items}):",
+      "\t${0:pass}"
+    ]
+  },
+  "while": {
+    "prefix": "while",
+    "description": "while 文",
+    "body": [
+      "while ${1:条件}:",
+      "\t${0:pass}"
+    ]
+  },
+  "if": {
+    "prefix": "if",
+    "description": "if 文",
+    "body": [
+      "if ${1:条件}:",
+      "\t${0:pass}"
+    ]
+  },
+  "if else": {
+    "prefix": "ife",
+    "description": "if 〜 else 文",
+    "body": [
+      "if ${1:条件}:",
+      "\t${2:pass}",
+      "else:",
+      "\t${0:pass}"
+    ]
+  },
+  "elif": {
+    "prefix": "elif",
+    "description": "elif",
+    "body": [
+      "elif ${1:条件}:",
+      "\t${0:pass}"
+    ]
+  },
+  "try": {
+    "prefix": "try",
+    "description": "例外の処理",
+    "body": [
+      "try:",
+      "\t${1:pass}",
+      "except ${2:Exception} as e:",
+      "\t${0:print(e)}"
+    ]
+  },
+  "with open (読む)": {
+    "prefix": "openr",
+    "description": "ファイルを開いて1行ずつ読む",
+    "body": [
+      "with open(${1:\"input.txt\"}, encoding=\"utf-8\") as f:",
+      "\tfor line in f:",
+      "\t\tline = line.rstrip()",
+      "\t\t$0"
+    ]
+  },
+  "with open (書く)": {
+    "prefix": "openw",
+    "description": "ファイルを開いて書き込む",
+    "body": [
+      "with open(${1:\"output.txt\"}, \"w\", encoding=\"utf-8\") as f:",
+      "\tf.write(${0:\"\"})"
+    ]
+  },
+  "整数を1つ読む": {
+    "prefix": "inint",
+    "description": "入力から整数を1つ読む",
+    "body": [
+      "${1:n} = int(input())"
+    ]
+  },
+  "整数を複数読む": {
+    "prefix": "inints",
+    "description": "入力から、空白区切りの整数を複数の変数に読む",
+    "body": [
+      "${1:a}, ${2:b} = map(int, input().split())"
+    ]
+  },
+  "整数のリストを読む": {
+    "prefix": "inlist",
+    "description": "入力から、空白区切りの整数をリストに読む",
+    "body": [
+      "${1:a} = list(map(int, input().split()))"
+    ]
+  },
+  "print f文字列": {
+    "prefix": "pf",
+    "description": "print (f 文字列で値を埋め込む)",
+    "body": [
+      "print(f\"${1}{${2:x}}\")"
+    ]
+  },
+  "リスト内包表記": {
+    "prefix": "lc",
+    "description": "リスト内包表記",
+    "body": [
+      "[${1:x} for ${2:x} in ${3:items}]"
+    ]
+  },
+  "リスト内包表記 (条件つき)": {
+    "prefix": "lcif",
+    "description": "リスト内包表記 (条件に合うものだけ)",
+    "body": [
+      "[${1:x} for ${2:x} in ${3:items} if ${4:条件}]"
+    ]
+  },
+  "2次元リスト": {
+    "prefix": "grid",
+    "description": "2次元リストを作る (h 行 w 列)",
+    "body": [
+      "${1:grid} = [[${2:0}] * ${3:w} for _ in range(${4:h})]"
+    ]
+  },
+  "lambda": {
+    "prefix": "lambda",
+    "description": "ラムダ式 (その場で作る関数)",
+    "body": [
+      "lambda ${1:x}: ${2:x}"
+    ]
+  },
+  "dataclass": {
+    "prefix": "dataclass",
+    "description": "データ用のクラス",
+    "body": [
+      "from dataclasses import dataclass",
+      "",
+      "",
+      "@dataclass",
+      "class ${1:Name}:",
+      "\t${2:x}: ${3:int}"
+    ]
+  },
+  "時間を計る": {
+    "prefix": "timeit",
+    "description": "処理にかかった時間を計る",
+    "body": [
+      "import time",
+      "",
+      "start = time.perf_counter()",
+      "$0",
+      "print(f\"{time.perf_counter() - start:.3f} 秒\")"
+    ]
+  },
+  "import": {
+    "prefix": "imp",
+    "description": "import",
+    "body": [
+      "import ${1:math}"
+    ]
+  },
+  "from import": {
+    "prefix": "from",
+    "description": "from 〜 import",
+    "body": [
+      "from ${1:math} import ${2:sqrt}"
+    ]
+  }
+}

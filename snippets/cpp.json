@@ -1,0 +1,225 @@
+{
+  "main": {
+    "prefix": "main",
+    "description": "main 関数 (ひな形)",
+    "body": [
+      "#include <iostream>",
+      "using namespace std;",
+      "",
+      "int main() {",
+      "\t$0",
+      "\treturn 0;",
+      "}"
+    ]
+  },
+  "include <>": {
+    "prefix": "inc",
+    "description": "#include <標準のヘッダ>",
+    "body": [
+      "#include <${1:iostream}>"
+    ]
+  },
+  "include \"\"": {
+    "prefix": "incl",
+    "description": "#include \"自分のヘッダ\"",
+    "body": [
+      "#include \"${1:header.h}\""
+    ]
+  },
+  "インクルードガード": {
+    "prefix": "guard",
+    "description": "ヘッダの二重読み込み防止",
+    "body": [
+      "#ifndef ${1:HEADER_H}",
+      "#define $1",
+      "",
+      "$0",
+      "",
+      "#endif // $1"
+    ]
+  },
+  "cout": {
+    "prefix": "cout",
+    "description": "cout で表示",
+    "body": [
+      "cout << ${1:x} << endl;"
+    ]
+  },
+  "cin": {
+    "prefix": "cin",
+    "description": "cin で読み込む",
+    "body": [
+      "cin >> ${1:x};"
+    ]
+  },
+  "for": {
+    "prefix": "for",
+    "description": "for 文 (0 から n-1 まで)",
+    "body": [
+      "for (int ${1:i} = 0; $1 < ${2:n}; $1++) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "for (範囲)": {
+    "prefix": "fore",
+    "description": "範囲 for 文 (すべての要素)",
+    "body": [
+      "for (auto &${1:x} : ${2:v}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "for (二重)": {
+    "prefix": "forij",
+    "description": "二重の for 文",
+    "body": [
+      "for (int i = 0; i < ${1:n}; i++) {",
+      "\tfor (int j = 0; j < ${2:m}; j++) {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ]
+  },
+  "while": {
+    "prefix": "while",
+    "description": "while 文",
+    "body": [
+      "while (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "do while": {
+    "prefix": "do",
+    "description": "do 〜 while 文",
+    "body": [
+      "do {",
+      "\t$0",
+      "} while (${1:条件});"
+    ]
+  },
+  "if": {
+    "prefix": "if",
+    "description": "if 文",
+    "body": [
+      "if (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "if else": {
+    "prefix": "ife",
+    "description": "if 〜 else 文",
+    "body": [
+      "if (${1:条件}) {",
+      "\t$2",
+      "} else {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "else if": {
+    "prefix": "elif",
+    "description": "else if",
+    "body": [
+      "else if (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "switch": {
+    "prefix": "switch",
+    "description": "switch 文",
+    "body": [
+      "switch (${1:式}) {",
+      "case ${2:値}:",
+      "\t$0",
+      "\tbreak;",
+      "default:",
+      "\tbreak;",
+      "}"
+    ]
+  },
+  "関数": {
+    "prefix": "func",
+    "description": "関数の定義",
+    "body": [
+      "${1:int} ${2:name}(${3}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "class": {
+    "prefix": "class",
+    "description": "クラス",
+    "body": [
+      "class ${1:Name} {",
+      "public:",
+      "\t$1(${2});",
+      "\t$0",
+      "",
+      "private:",
+      "};"
+    ]
+  },
+  "struct": {
+    "prefix": "struct",
+    "description": "構造体",
+    "body": [
+      "struct ${1:Name} {",
+      "\t$0",
+      "};"
+    ]
+  },
+  "vector": {
+    "prefix": "vec",
+    "description": "vector (可変長の配列)",
+    "body": [
+      "vector<${1:int}> ${2:v}(${3:n});"
+    ]
+  },
+  "sort": {
+    "prefix": "sort",
+    "description": "並べ替え (algorithm が必要)",
+    "body": [
+      "sort(${1:v}.begin(), $1.end());"
+    ]
+  },
+  "ラムダ式": {
+    "prefix": "lambda",
+    "description": "ラムダ式 (その場で作る関数)",
+    "body": [
+      "auto ${1:f} = [${2:&}](${3}) {",
+      "\t$0",
+      "};"
+    ]
+  },
+  "try catch": {
+    "prefix": "try",
+    "description": "例外の処理",
+    "body": [
+      "try {",
+      "\t$0",
+      "} catch (const exception &e) {",
+      "\tcerr << e.what() << endl;",
+      "}"
+    ]
+  },
+  "競プロのひな形": {
+    "prefix": "kyopro",
+    "description": "競技プログラミング用のひな形",
+    "body": [
+      "#include <bits/stdc++.h>",
+      "using namespace std;",
+      "using ll = long long;",
+      "",
+      "int main() {",
+      "\tios::sync_with_stdio(false);",
+      "\tcin.tie(nullptr);",
+      "\t$0",
+      "\treturn 0;",
+      "}"
+    ]
+  }
+}

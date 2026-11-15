@@ -1,0 +1,370 @@
+{
+  "main": {
+    "prefix": "main",
+    "description": "main 関数 (ひな形)",
+    "body": [
+      "#include <stdio.h>",
+      "",
+      "int main(void) {",
+      "\t$0",
+      "\treturn 0;",
+      "}"
+    ]
+  },
+  "main (引数あり)": {
+    "prefix": "mainargs",
+    "description": "コマンドライン引数つきの main 関数",
+    "body": [
+      "#include <stdio.h>",
+      "",
+      "int main(int argc, char *argv[]) {",
+      "\t$0",
+      "\treturn 0;",
+      "}"
+    ]
+  },
+  "include <>": {
+    "prefix": "inc",
+    "description": "#include <標準のヘッダ>",
+    "body": [
+      "#include <${1:stdio.h}>"
+    ]
+  },
+  "include \"\"": {
+    "prefix": "incl",
+    "description": "#include \"自分のヘッダ\"",
+    "body": [
+      "#include \"${1:header.h}\""
+    ]
+  },
+  "define": {
+    "prefix": "def",
+    "description": "#define (定数)",
+    "body": [
+      "#define ${1:N} ${2:100}"
+    ]
+  },
+  "インクルードガード": {
+    "prefix": "guard",
+    "description": "ヘッダの二重読み込み防止",
+    "body": [
+      "#ifndef ${1:HEADER_H}",
+      "#define $1",
+      "",
+      "$0",
+      "",
+      "#endif /* $1 */"
+    ]
+  },
+  "for": {
+    "prefix": "for",
+    "description": "for 文 (0 から n-1 まで)",
+    "body": [
+      "for (int ${1:i} = 0; $1 < ${2:n}; $1++) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "for (逆順)": {
+    "prefix": "forr",
+    "description": "for 文 (n-1 から 0 まで)",
+    "body": [
+      "for (int ${1:i} = ${2:n} - 1; $1 >= 0; $1--) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "for (二重)": {
+    "prefix": "forij",
+    "description": "二重の for 文 (2次元配列など)",
+    "body": [
+      "for (int i = 0; i < ${1:n}; i++) {",
+      "\tfor (int j = 0; j < ${2:m}; j++) {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ]
+  },
+  "while": {
+    "prefix": "while",
+    "description": "while 文",
+    "body": [
+      "while (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "do while": {
+    "prefix": "do",
+    "description": "do 〜 while 文",
+    "body": [
+      "do {",
+      "\t$0",
+      "} while (${1:条件});"
+    ]
+  },
+  "if": {
+    "prefix": "if",
+    "description": "if 文",
+    "body": [
+      "if (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "if else": {
+    "prefix": "ife",
+    "description": "if 〜 else 文",
+    "body": [
+      "if (${1:条件}) {",
+      "\t$2",
+      "} else {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "else if": {
+    "prefix": "elif",
+    "description": "else if",
+    "body": [
+      "else if (${1:条件}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "else": {
+    "prefix": "else",
+    "description": "else",
+    "body": [
+      "else {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "switch": {
+    "prefix": "switch",
+    "description": "switch 文",
+    "body": [
+      "switch (${1:式}) {",
+      "case ${2:値}:",
+      "\t$0",
+      "\tbreak;",
+      "default:",
+      "\tbreak;",
+      "}"
+    ]
+  },
+  "case": {
+    "prefix": "case",
+    "description": "case",
+    "body": [
+      "case ${1:値}:",
+      "\t$0",
+      "\tbreak;"
+    ]
+  },
+  "関数": {
+    "prefix": "func",
+    "description": "関数の定義",
+    "body": [
+      "${1:int} ${2:name}(${3:void}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "struct": {
+    "prefix": "struct",
+    "description": "構造体",
+    "body": [
+      "struct ${1:name} {",
+      "\t$0",
+      "};"
+    ]
+  },
+  "typedef struct": {
+    "prefix": "tstruct",
+    "description": "構造体 (typedef で型名を付ける)",
+    "body": [
+      "typedef struct {",
+      "\t$0",
+      "} ${1:Name};"
+    ]
+  },
+  "enum": {
+    "prefix": "enum",
+    "description": "列挙型",
+    "body": [
+      "typedef enum {",
+      "\t$0",
+      "} ${1:Name};"
+    ]
+  },
+  "連結リストのノード": {
+    "prefix": "node",
+    "description": "連結リストのノード (自分自身へのポインタを持つ構造体)",
+    "body": [
+      "typedef struct ${1:node} {",
+      "\t${2:int data};",
+      "\tstruct $1 *next;",
+      "} ${3:Node};"
+    ]
+  },
+  "printf 整数": {
+    "prefix": "pd",
+    "description": "printf で整数を表示",
+    "body": [
+      "printf(\"%d\\n\", ${1:n});"
+    ]
+  },
+  "printf 実数": {
+    "prefix": "pf",
+    "description": "printf で実数を表示",
+    "body": [
+      "printf(\"%f\\n\", ${1:x});"
+    ]
+  },
+  "printf 文字列": {
+    "prefix": "ps",
+    "description": "printf で文字列を表示",
+    "body": [
+      "printf(\"%s\\n\", ${1:s});"
+    ]
+  },
+  "printf": {
+    "prefix": "pr",
+    "description": "printf (改行つき)",
+    "body": [
+      "printf(\"${1}\\n\"$2);"
+    ]
+  },
+  "scanf 整数": {
+    "prefix": "sd",
+    "description": "scanf で整数を読み込む",
+    "body": [
+      "scanf(\"%d\", &${1:n});"
+    ]
+  },
+  "scanf 実数": {
+    "prefix": "sf",
+    "description": "scanf で double を読み込む (%lf)",
+    "body": [
+      "scanf(\"%lf\", &${1:x});"
+    ]
+  },
+  "scanf 文字列": {
+    "prefix": "ss",
+    "description": "scanf で文字列を読み込む (& は付けない)",
+    "body": [
+      "scanf(\"%s\", ${1:s});"
+    ]
+  },
+  "fgets で1行": {
+    "prefix": "fgetsline",
+    "description": "fgets で1行読み込み、末尾の改行を消す (string.h が必要)",
+    "body": [
+      "fgets(${1:buf}, sizeof($1), stdin);",
+      "$1[strcspn($1, \"\\n\")] = '\\0';"
+    ]
+  },
+  "malloc": {
+    "prefix": "mal",
+    "description": "malloc でメモリを確保 (失敗の確認つき。stdlib.h が必要)",
+    "body": [
+      "${1:int} *${2:p} = malloc(sizeof($1) * ${3:n});",
+      "if ($2 == NULL) {",
+      "\tfprintf(stderr, \"メモリを確保できません\\n\");",
+      "\texit(1);",
+      "}",
+      "$0",
+      "free($2);"
+    ]
+  },
+  "fopen (読む)": {
+    "prefix": "fopenr",
+    "description": "ファイルを開いて1行ずつ読む",
+    "body": [
+      "FILE *${1:fp} = fopen(${2:\"input.txt\"}, \"r\");",
+      "if ($1 == NULL) {",
+      "\tperror(\"fopen\");",
+      "\treturn 1;",
+      "}",
+      "char ${3:line}[256];",
+      "while (fgets($3, sizeof($3), $1) != NULL) {",
+      "\t$0",
+      "}",
+      "fclose($1);"
+    ]
+  },
+  "fopen (書く)": {
+    "prefix": "fopenw",
+    "description": "ファイルを開いて書き込む",
+    "body": [
+      "FILE *${1:fp} = fopen(${2:\"output.txt\"}, \"w\");",
+      "if ($1 == NULL) {",
+      "\tperror(\"fopen\");",
+      "\treturn 1;",
+      "}",
+      "fprintf($1, \"$0\\n\");",
+      "fclose($1);"
+    ]
+  },
+  "配列を表示": {
+    "prefix": "parr",
+    "description": "配列の中身を1行で表示",
+    "body": [
+      "for (int i = 0; i < ${2:n}; i++) {",
+      "\tprintf(\"%d \", ${1:a}[i]);",
+      "}",
+      "printf(\"\\n\");"
+    ]
+  },
+  "swap": {
+    "prefix": "swap",
+    "description": "2つの変数の値を入れ替える",
+    "body": [
+      "${1:int} ${2:tmp} = ${3:a};",
+      "$3 = ${4:b};",
+      "$4 = $2;"
+    ]
+  },
+  "乱数の準備": {
+    "prefix": "srand",
+    "description": "乱数の種を設定 (stdlib.h と time.h が必要)",
+    "body": [
+      "srand((unsigned int)time(NULL));"
+    ]
+  },
+  "qsort の比較関数": {
+    "prefix": "cmp",
+    "description": "qsort 用の比較関数 (int・小さい順)",
+    "body": [
+      "int ${1:cmp}(const void *a, const void *b) {",
+      "\tint x = *(const int *)a, y = *(const int *)b;",
+      "\treturn (x > y) - (x < y);",
+      "}"
+    ]
+  },
+  "時間を計る": {
+    "prefix": "timeit",
+    "description": "処理にかかった時間を計る (time.h が必要)",
+    "body": [
+      "clock_t ${1:start} = clock();",
+      "$0",
+      "printf(\"%.3f 秒\\n\", (double)(clock() - $1) / CLOCKS_PER_SEC);"
+    ]
+  },
+  "三項演算子": {
+    "prefix": "ter",
+    "description": "条件 ? 真のとき : 偽のとき",
+    "body": [
+      "${1:条件} ? ${2:a} : ${3:b}"
+    ]
+  },
+  "コメント (ブロック)": {
+    "prefix": "cm",
+    "description": "/* コメント */",
+    "body": [
+      "/* $0 */"
+    ]
+  }
+}
