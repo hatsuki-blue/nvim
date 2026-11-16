@@ -144,9 +144,15 @@ local function parse_members(body)
 end
 
 -- lines を調べて、sym に集める
-local function scan_c(lines, sym)
+--   file: そのコードがあるファイル (今のバッファなら nil)。定義へのジャンプ (gd) に使う
+local function scan_c(lines, sym, file)
   local cl = clean_lines(lines)
   local text = table.concat(cl, "\n")
+  -- 名前 → 定義の場所。prefer: すでに場所を知っていても上書きする (プロトタイプ宣言より、本体の定義を優先)
+  local function at(name, line, prefer)
+    if prefer or not sym.where[name] then sym.where[name] = { file = file, line = line, proto = not prefer } end
+  end
+  local function line_of(pos) return select(2, text:sub(1, pos):gsub("\n", "")) + 1 end
 
   -- 構造体 / 共用体
   for _, kw in ipairs({ "struct", "union", "class" }) do
@@ -156,8 +162,12 @@ local function scan_c(lines, sym)
       if not s then break end
       local is_typedef = text:sub(math.max(1, s - 12), s - 1):find("typedef%s+$") ~= nil
       local members = parse_members(body)
-      if tag ~= "" then sym.structs[tag] = members end
+      if tag ~= "" then
+        sym.structs[tag] = members
+        at(tag, line_of(s), true)
+      end
       if is_typedef and alias ~= "" then
+        at(alias, line_of(s), true)
         sym.structs[alias] = members
         sym.types[alias] = kw .. (tag ~= "" and (" " .. tag) or "")
       end
@@ -166,10 +176,14 @@ local function scan_c(lines, sym)
   end
 
   -- 列挙
-  for body in text:gmatch("%f[%w_]enum%f[^%w_]%s*[%a_]?[%w_]*%s*(%b{})") do
+  for pos, body in text:gmatch("()%f[%w_]enum%f[^%w_]%s*[%a_]?[%w_]*%s*(%b{})") do
+    local enum_line = line_of(pos)
     for piece in body:sub(2, -2):gmatch("[^,]+") do
       local name = piece:match("^%s*([%a_][%w_]*)")
-      if name then sym.enums[name] = true end
+      if name then
+        sym.enums[name] = true
+        at(name, enum_line)
+      end
     end
   end
 
@@ -179,6 +193,7 @@ local function scan_c(lines, sym)
     if depth == 0 then
       local name, rest = l:match("^%s*#%s*define%s+([%a_][%w_]*)(.*)$")
       if name then
+        at(name, i, true)
         local args = rest:match("^(%b())")
         if args then
           sym.funcs[name] = { sig = "#define " .. name .. args, macro = true, noargs = args:match("^%(%s*%)$") ~= nil }
@@ -188,6 +203,7 @@ local function scan_c(lines, sym)
       elseif l:find("^%s*typedef%f[^%w_]") and not l:find("{", 1, true) then
         local alias = l:match("([%a_][%w_]*)%s*;%s*$") or l:match("%(%s*%*%s*([%a_][%w_]*)%s*%)")
         if alias then
+          at(alias, i)
           sym.types[alias] = trim((l:gsub("^%s*typedef%s+", ""):gsub(";%s*$", "")))
           local tag = l:match("struct%s+([%a_][%w_]*)") or l:match("union%s+([%a_][%w_]*)")
           if tag then sym.alias_of[alias] = tag end
@@ -201,6 +217,7 @@ local function scan_c(lines, sym)
             line = i,
           }
           sym.funcs[fname].sig = sym.funcs[fname].sig:gsub("%* ", "*")
+          at(fname, i, not l:find(";%s*$")) -- ; で終わるのはプロトタイプ宣言
         end
       end
     end
@@ -211,7 +228,7 @@ local function scan_c(lines, sym)
 end
 
 local function new_sym()
-  return { funcs = {}, macros = {}, types = {}, structs = {}, enums = {}, alias_of = {} }
+  return { funcs = {}, macros = {}, types = {}, structs = {}, enums = {}, alias_of = {}, where = {} }
 end
 
 -- ヘッダファイルの中身 (更新時刻が変わるまで覚えておく)
@@ -228,7 +245,7 @@ local function scan_header(path, sym, seen, depth)
     c = { mtime = st.mtime.sec, size = st.size, lines = lines }
     header_cache[path] = c
   end
-  scan_c(c.lines, sym)
+  scan_c(c.lines, sym, path)
   local dir = vim.fs.dirname(path)
   for _, l in ipairs(c.lines) do
     local inc = l:match('^%s*#%s*include%s*"([^"]+)"')
@@ -484,6 +501,23 @@ local function c_items(ctx, before, next_char)
     }
   end
 
+  -- 今のファイルが読み込んでいるヘッダ。標準関数を確定したとき、足りない #include を自動で足すのに使う
+  local included, last_include, any_include = {}, 0, false
+  for i, l in ipairs(lines) do
+    local h = l:match('^%s*#%s*include%s*[<"]([^>"]+)[>"]')
+    if h then included[h], last_include, any_include = true, i, true end
+    if i > 400 and not h and last_include > 0 and i - last_include > 200 then break end
+  end
+  local function include_edit(header)
+    if header == "" or included[header] or included["bits/stdc++.h"] then return nil end
+    if cpp and included["c" .. header:gsub("%.h$", "")] then return nil end -- <cstdio> は <stdio.h> と同じ
+    if header == "stddef.h" and any_include then return nil end -- NULL や size_t は、ほかのヘッダにも入っている
+    return {
+      newText = "#include <" .. header .. ">\n",
+      range = { start = { line = last_include, character = 0 }, ["end"] = { line = last_include, character = 0 } },
+    }
+  end
+
   -- 標準ライブラリ (C++ のファイルでは、C++ の辞書を先に見る)
   for _, dd in ipairs({ cpp or false, d or false }) do
     for _, it in ipairs(dd and dd.items or {}) do
@@ -501,6 +535,12 @@ local function c_items(ctx, before, next_char)
         else
           item.kind = Kind.Function
           item.insertText, item.insertTextFormat = call_text(name, sig:find("%(void%)$") ~= nil, next_char)
+        end
+        local edit = include_edit(header)
+        if edit then
+          item.additionalTextEdits = { edit }
+          item.documentation.value = item.documentation.value
+            .. "\n\n(確定すると `#include <" .. header .. ">` を自動で追加します)"
         end
         items[#items + 1] = item
       end
@@ -520,16 +560,20 @@ local function py_scan(buf)
   local tick = api.nvim_buf_get_changedtick(buf)
   local c = sym_cache[buf]
   if c and c.tick == tick and c.lang == "python" then return c.sym end
-  local sym = { funcs = {}, classes = {}, aliases = {}, attrs = {}, methods = {} }
+  local sym = { funcs = {}, classes = {}, aliases = {}, attrs = {}, methods = {}, where = {} }
   local lines = api.nvim_buf_line_count(buf) <= 20000 and api.nvim_buf_get_lines(buf, 0, -1, false) or {}
-  for _, l in ipairs(lines) do
+  for i, l in ipairs(lines) do
     local indent, name, args = l:match("^(%s*)def%s+([%a_][%w_]*)%s*(%b())")
     if name then
+      sym.where[name] = sym.where[name] or { line = i }
       local f = { sig = "def " .. name .. args, noargs = args:match("^%(%s*%)$") ~= nil or args:match("^%(%s*self%s*%)$") ~= nil }
       if indent ~= "" and args:find("^%(%s*self") then sym.methods[name] = f else sym.funcs[name] = f end
     end
     local cls = l:match("^%s*class%s+([%a_][%w_]*)")
-    if cls then sym.classes[cls] = trim(l) end
+    if cls then
+      sym.classes[cls] = trim(l)
+      sym.where[cls] = sym.where[cls] or { line = i }
+    end
     local mod, alias = l:match("^%s*import%s+([%w_%.]+)%s+as%s+([%a_][%w_]*)")
     if mod then sym.aliases[alias] = mod end
     for attr in l:gmatch("self%.([%a_][%w_]*)%s*=[^=]") do sym.attrs[attr] = true end
@@ -903,6 +947,100 @@ local function sig_update()
   end
 end
 
+-- ===== gd: 定義へ移動 =====
+--   LSP があれば LSP、無ければ自分のコードの中 (C は読み込んでいる自分のヘッダも) から探す。
+--   見つからなければ Vim 本来の gd (関数の中の宣言へ)
+local function where(buf, name)
+  local lang = LANG[vim.bo[buf].filetype]
+  if lang == "c" then return (c_symbols(buf)).where[name] end
+  if lang == "python" then return py_scan(buf).where[name] end
+  return nil
+end
+
+function M.goto_definition()
+  local buf = api.nvim_get_current_buf()
+  if has_lsp(buf, "definitionProvider") then return vim.lsp.buf.definition() end
+  local word = vim.fn.expand("<cword>")
+  local ok, w = pcall(where, buf, word)
+  if not ok or not w then return pcall(vim.cmd, "normal! gd") end
+  -- ヘッダにあるのがプロトタイプ宣言だけなら、同じ名前の .c / .cpp にある本体を探す (list.h → list.c)
+  if w.file and w.proto then
+    for _, ext in ipairs({ ".c", ".cpp", ".cc" }) do
+      local src = w.file:gsub("%.[^./\\]+$", "") .. ext
+      local st = vim.uv.fs_stat(src)
+      if st and st.type == "file" and st.size < 512 * 1024 then
+        local read_ok, lines = pcall(vim.fn.readfile, src)
+        local sym = new_sym()
+        if read_ok and pcall(scan_c, lines, sym, src) and sym.where[word] and not sym.where[word].proto then
+          w = sym.where[word]
+          break
+        end
+      end
+    end
+  end
+  vim.cmd("normal! m'") -- Ctrl-o で元の場所に戻れるようにする
+  if w.file and vim.fs.normalize(api.nvim_buf_get_name(buf)) ~= w.file then
+    local opened = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(w.file))
+    if not opened then return vim.notify("ファイルを開けませんでした: " .. w.file, vim.log.levels.WARN) end
+  end
+  local line = math.min(w.line, api.nvim_buf_line_count(0))
+  local col = (api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ""):find(word, 1, true)
+  api.nvim_win_set_cursor(0, { line, (col or 1) - 1 })
+  vim.cmd("normal! zz")
+end
+
+-- ===== grn: 名前の変更 =====
+--   LSP があれば LSP (プロジェクト全体・正確)。無ければ、今のファイルの中の同じ単語をすべて置き換える
+function M.rename()
+  local buf = api.nvim_get_current_buf()
+  if has_lsp(buf, "renameProvider") then return vim.lsp.buf.rename() end
+  local old = vim.fn.expand("<cword>")
+  if old == "" or not old:match("^[%a_][%w_]*$") then return vim.notify("名前の上にカーソルを置いてください") end
+  vim.ui.input({ prompt = "新しい名前 (このファイル内の " .. old .. " をすべて変更): ", default = old }, function(new)
+    if not new or new == "" or new == old then return end
+    if not new:match("^[%a_][%w_]*$") then return vim.notify("名前に使えない文字が入っています: " .. new, vim.log.levels.WARN) end
+    local lines = api.nvim_buf_get_lines(buf, 0, -1, false)
+    local count, changed = 0, {}
+    for i, l in ipairs(lines) do
+      local replaced, n = l:gsub("%f[%w_]" .. old .. "%f[^%w_]", new)
+      if n > 0 then
+        count = count + n
+        changed[#changed + 1] = { i, replaced }
+      end
+    end
+    for _, c in ipairs(changed) do api.nvim_buf_set_lines(buf, c[1] - 1, c[1], false, { c[2] }) end
+    vim.notify(("%s → %s: %d か所を変更しました (文字列やコメントの中も含みます。戻すには u)"):format(old, new, count))
+  end)
+end
+
+-- ===== 関数などの一覧 (LSP も構文解析も無いとき用) =====
+function M.outline()
+  local buf = api.nvim_get_current_buf()
+  local lang = LANG[vim.bo[buf].filetype]
+  if not lang then return vim.notify("この種類のファイルの一覧は作れません") end
+  local sym = lang == "c" and (c_symbols(buf)) or py_scan(buf)
+  local list = {}
+  for name, w in pairs(sym.where) do
+    if not w.file then
+      local f = sym.funcs[name] or (sym.methods and sym.methods[name])
+      local text = f and f.sig or (sym.classes and sym.classes[name])
+        or (sym.macros and sym.macros[name] and ("#define " .. name)) or name
+      list[#list + 1] = { line = w.line, text = text }
+    end
+  end
+  if #list == 0 then return vim.notify("このファイルに、関数や型の定義は見つかりませんでした") end
+  table.sort(list, function(a, b) return a.line < b.line end)
+  vim.ui.select(list, {
+    prompt = "関数などの一覧",
+    format_item = function(it) return ("%4d  %s"):format(it.line, it.text) end,
+  }, function(it)
+    if not it then return end
+    vim.cmd("normal! m'")
+    api.nvim_win_set_cursor(0, { it.line, 0 })
+    vim.cmd("normal! zz")
+  end)
+end
+
 function M.setup()
   local group = api.nvim_create_augroup("offline_cmp", { clear = true })
   api.nvim_create_autocmd({ "TextChangedI", "CursorMovedI", "InsertEnter" }, {
@@ -919,6 +1057,8 @@ function M.setup()
     pattern = { "c", "cpp", "python" },
     callback = function(ev)
       vim.keymap.set("n", "K", M.hover, { buffer = ev.buf, desc = "説明を表示 (LSP が無ければ辞書)" })
+      vim.keymap.set("n", "gd", M.goto_definition, { buffer = ev.buf, desc = "定義へ (LSP が無ければ自分のコードから探す)" })
+      vim.keymap.set("n", "grn", M.rename, { buffer = ev.buf, desc = "名前の変更 (LSP が無ければ、このファイル内)" })
     end,
   })
 end

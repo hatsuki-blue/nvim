@@ -3,6 +3,7 @@
 --   C / C++ の実行ファイルは、ソースの隣ではなく nvim のキャッシュ置き場に作る (フォルダを散らかさない)
 local M = {}
 local is_windows = vim.fn.has("win32") == 1
+local ns = vim.api.nvim_create_namespace("user_run")
 
 local function exe(name) return vim.fn.executable(name) == 1 end
 local function first(...)
@@ -115,7 +116,7 @@ function M.run(args)
     return vim.notify(missing .. " が見つからないので、実行できません", vim.log.levels.ERROR)
   end
   if args and args ~= "" then cmd = cmd .. " " .. args end
-  M.last = { cmd = cmd, cwd = vim.fs.dirname(file), label = "実行: " .. vim.fn.fnamemodify(file, ":t") }
+  M.last = { cmd = cmd, cwd = vim.fs.dirname(file), label = "実行: " .. vim.fn.fnamemodify(file, ":t"), file = file, src = buf }
   M.again()
 end
 
@@ -125,10 +126,77 @@ function M.again()
   local term = require("user.terminal")
   -- 前回の実行結果のターミナルは閉じる (実行のたびに増えていかないように)
   if M.buf and vim.api.nvim_buf_is_valid(M.buf) then pcall(term.kill, M.buf) end
+  if M.last.src and vim.api.nvim_buf_is_valid(M.last.src) then vim.diagnostic.reset(ns, M.last.src) end
   M.buf = term.run(M.last.cmd, { cwd = M.last.cwd, vars = { term_label = M.last.label } })
 end
 
+-- 実行が終わったら、エラーを日本語で説明する (lua/user/run_ja.lua)
+--   * 実行結果の最後に、説明の行を足す (画面の表示だけ。出力そのものは変えない)
+--   * エラーの行がわかるときは、ソースのその行にも印を付ける (次に実行するか、書き換えると消える)
+local function explain(term_buf, status)
+  local last = M.last
+  if not last or not vim.api.nvim_buf_is_valid(term_buf) then return end
+  local lines = vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)
+  -- ターミナルは、幅に収まらない行を折り返して複数の行にしている。幅いっぱいの行は、次の行とつなげて元に戻す
+  local width, joined = 0, {}
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l)) end
+  local carry = nil
+  for _, l in ipairs(lines) do
+    local full = carry and (carry .. l) or l
+    if width > 0 and vim.fn.strdisplaywidth(l) >= width then
+      carry = full
+    else
+      joined[#joined + 1] = full
+      carry = nil
+    end
+  end
+  if carry then joined[#joined + 1] = carry end
+  local res = require("user.run_ja").explain(joined, last.file, status)
+  if not res then return end
+  local row = #lines
+  while row > 1 and lines[row] == "" do row = row - 1 end
+  local virt = { { { "", "Comment" } }, { { "── 日本語での説明 ──", "DiagnosticInfo" } } }
+  for _, t in ipairs(res.text) do virt[#virt + 1] = { { " " .. t, "DiagnosticError" } } end
+  pcall(vim.api.nvim_buf_set_extmark, term_buf, ns, row - 1, 0, { virt_lines = virt })
+  -- 説明が画面の外にならないように、ターミナルを一番下まで送る
+  for _, w in ipairs(vim.fn.win_findbuf(term_buf)) do
+    pcall(function()
+      vim.api.nvim_win_set_cursor(w, { row, 0 })
+      vim.api.nvim_win_call(w, function()
+        vim.fn.winrestview({ topline = math.max(1, row - vim.api.nvim_win_get_height(w) + #virt + 1) })
+      end)
+    end)
+  end
+  local src = last.src
+  if #res.marks > 0 and src and vim.api.nvim_buf_is_valid(src) then
+    local diags, count = {}, vim.api.nvim_buf_line_count(src)
+    for _, m in ipairs(res.marks) do
+      -- その行に、すでにエラーの表示 (編集中の構文チェックなど) があれば、重ねて出さない
+      if m.line >= 1 and m.line <= count and #vim.diagnostic.get(src, { lnum = m.line - 1 }) == 0 then
+        diags[#diags + 1] = {
+          lnum = m.line - 1, col = 0, message = m.message, source = "実行したときのエラー",
+          severity = vim.diagnostic.severity.ERROR,
+        }
+      end
+    end
+    vim.diagnostic.set(ns, src, diags)
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      buffer = src, once = true,
+      callback = function() vim.diagnostic.reset(ns, src) end,
+    })
+  end
+end
+
 function M.setup()
+  vim.api.nvim_create_autocmd("TermClose", {
+    group = vim.api.nvim_create_augroup("user_run", {}),
+    callback = function(ev)
+      if ev.buf ~= M.buf then return end
+      local status = vim.v.event.status
+      -- 出力の最後の行が画面に出そろってから調べる
+      vim.defer_fn(function() pcall(explain, ev.buf, status) end, 150)
+    end,
+  })
   vim.api.nvim_create_user_command("Run", function(a) M.run(a.args) end,
     { nargs = "*", desc = "今のファイルを実行 (後ろに書いたものは、プログラムへの引数)" })
   vim.keymap.set("n", "<leader>r", function() M.run() end, { desc = "今のファイルを実行" })

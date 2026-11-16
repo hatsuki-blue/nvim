@@ -27,6 +27,7 @@ function M.report()
   add(" モード")
   add("  オフラインモード (:Offline) : " .. (vim.g.offline and "オン (自動ダウンロードしない)" or "オフ"))
   add("  アイコン無しモード (:NoIcons): " .. (vim.g.have_nerd_font and "オフ" or "オン"))
+  add("  コピー・貼り付けの共有        : " .. (vim.g.clipboard_kind or "× 使えません (nvim の中だけ)"))
   add("")
   add(" 基本のツール")
   local tools = {

@@ -37,12 +37,97 @@ o.cursorline = true
 o.signcolumn = "yes"
 o.termguicolors = true
 o.mouse = "a"
--- OS のクリップボードと共有 (xclip などのクリップボード連携が無い環境では使わない。
--- 無いのに設定すると、コピーのたびに "clipboard: No provider" と出る)
-if vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1 or vim.fn.executable("xclip") == 1
-  or vim.fn.executable("xsel") == 1 or vim.fn.executable("wl-copy") == 1 then
-  o.clipboard = "unnamedplus"
+-- コピー (y) と貼り付け (p) を、OS のクリップボードと共有する。
+--   nvim でコピーしたものをブラウザなどに貼れて、ほかのアプリでコピーしたものを p で貼れる。
+--   環境ごとに、使える方法を上から順に選ぶ (どの方法になったかは :EnvCheck で確認できる):
+--     1. Windows / macOS                    … OS の機能
+--     2. Linux の画面 + xclip / xsel / wl-copy … それらのコマンド
+--     3. WSL (Windows の中の Linux)          … Windows の clip.exe と PowerShell
+--     4. それ以外 (xclip などを入れられない PC、SSH で入った先) … OSC 52
+--        OSC 52 は、「これをクリップボードに入れて」と端末アプリに頼む仕組み。追加のコマンドは不要。
+--        Windows Terminal / WezTerm / kitty / Alacritty / iTerm2 / foot などが対応 (GNOME 端末は未対応)。
+--        端末から読み出す方は、対応していない端末で nvim が固まるので使わない。
+--        ほかのアプリでコピーしたものは、端末アプリの貼り付け (Ctrl+Shift+V や右クリック) で貼る
+do
+  local function exe(name) return vim.fn.executable(name) == 1 end
+  local env = vim.env
+  local kind
+  if vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1 then
+    kind = "OS の機能"
+  elseif env.WAYLAND_DISPLAY and exe("wl-copy") and exe("wl-paste") then
+    kind = "wl-copy"
+  elseif env.DISPLAY and (exe("xclip") or exe("xsel")) then
+    kind = exe("xclip") and "xclip" or "xsel"
+  elseif vim.fn.has("wsl") == 1 and exe("win32yank.exe") then
+    kind = "win32yank"
+  elseif vim.fn.has("wsl") == 1 and exe("clip.exe") and exe("powershell.exe") then
+    kind = "Windows (WSL 経由)"
+    -- clip.exe は UTF-16 で渡さないと日本語が文字化けする。PowerShell の出力は UTF-8 にさせる
+    local paste = {
+      "powershell.exe", "-NoLogo", "-NoProfile", "-Command",
+      '[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write($(Get-Clipboard -Raw).ToString().Replace("`r", ""))',
+    }
+    local copy = exe("iconv") and { "sh", "-c", "iconv -f UTF-8 -t UTF-16LE | clip.exe" } or "clip.exe"
+    vim.g.clipboard = {
+      name = "WSL", copy = { ["+"] = copy, ["*"] = copy }, paste = { ["+"] = paste, ["*"] = paste }, cache_enabled = 0,
+    }
+  else
+    local ok, osc52 = pcall(require, "vim.ui.clipboard.osc52")
+    if ok then
+      kind = "OSC 52 (端末アプリ経由。コピーのみ)"
+      -- 貼り付け (p) は、nvim の中で最後にコピーしたものを返す
+      local last = {}
+      local function copy(reg)
+        local send = osc52.copy(reg)
+        return function(lines, regtype)
+          last[reg] = { lines, regtype }
+          pcall(send, lines)
+        end
+      end
+      local function paste(reg)
+        return function() return last[reg] or last["+"] or last["*"] or { { "" }, "v" } end
+      end
+      vim.g.clipboard = {
+        name = "OSC 52",
+        copy = { ["+"] = copy("+"), ["*"] = copy("*") },
+        paste = { ["+"] = paste("+"), ["*"] = paste("*") },
+      }
+    end
+  end
+  vim.g.clipboard_kind = kind
+  if kind then o.clipboard = "unnamedplus" end
 end
+-- 選択して Ctrl-C でもコピーできる (Vim 本来の Ctrl-C は「選択をやめる」だけなので、コピーしてからやめる)
+vim.keymap.set("x", "<C-c>", '"+y', { desc = "コピー (y と同じ)" })
+
+-- 右クリックのメニューを日本語にする (標準のメニューは英語)
+vim.api.nvim_create_autocmd("VimEnter", {
+  once = true,
+  callback = function()
+    pcall(vim.cmd, "aunmenu PopUp")
+    pcall(vim.api.nvim_clear_autocmds, { group = "nvim.popupmenu" })
+    vim.cmd([[
+      vnoremenu PopUp.コピー                "+y
+      vnoremenu PopUp.切り取り              "+x
+      anoremenu PopUp.貼り付け              "+gP
+      vnoremenu PopUp.貼り付け              "+P
+      vnoremenu PopUp.削除                  "_x
+      nnoremenu PopUp.すべて選択            ggVG
+      vnoremenu PopUp.すべて選択            gg0oG$
+      inoremenu PopUp.すべて選択            <C-Home><C-O>VG
+      anoremenu PopUp.-1-                   <Nop>
+      nmenu     PopUp.説明を表示\ (K)       K
+      nmenu     PopUp.定義へ移動\ (gd)      gd
+      nmenu     PopUp.名前を変更\ (grn)     grn
+      nnoremenu PopUp.この行のエラーを表示  <Cmd>lua vim.diagnostic.open_float()<CR>
+      nnoremenu PopUp.リンクを開く\ (gx)    gx
+      anoremenu PopUp.-2-                   <Nop>
+      nnoremenu PopUp.このファイルを実行    <Cmd>Run<CR>
+      nnoremenu PopUp.元に戻す\ (u)         u
+      nnoremenu PopUp.やり直す\ (Ctrl-r)    <C-r>
+    ]])
+  end,
+})
 o.ignorecase = true
 o.smartcase = true
 o.undofile = true
@@ -274,6 +359,13 @@ vim.api.nvim_create_user_command("Claude", function(a)
     { esc = false, vars = { term_label = "Claude Code (この PC)", is_claude = true, autoclose = true } })
 end, { nargs = "*" })
 
+-- 変更の履歴 (undo の枝分かれ) を一覧で表示する。nvim 0.12 に付属の機能
+vim.keymap.set("n", "<leader>u", function()
+  if not pcall(vim.cmd, "packadd nvim.undotree") or not pcall(vim.cmd, "Undotree") then
+    vim.notify("変更の履歴の一覧は、nvim 0.12 以上で使えます", vim.log.levels.WARN)
+  end
+end, { desc = "変更の履歴 (undo) の一覧" })
+
 -- ===== 実行 / オフライン補完 / 環境の確認 =====
 -- <Space>r と :Run で今のファイルを実行 (lua/user/run.lua)
 require("user.run").setup()
@@ -338,6 +430,7 @@ local cheatsheet = {
   "  Tab / Shift-Tab ひな形 (スニペット) の次 / 前の入力欄へ",
   "  (LSP が無くても、C / C++ / Python は辞書で補完できます)",
   "  gd / K         定義へ / 説明を表示",
+  "  grn            名前の変更",
   "  grr / grn / gra 参照一覧 / 名前変更 / 修正候補",
   "  ]d / [d        次 / 前のエラーへ",
   "  Ctrl-w d       エラーの詳細",
@@ -350,6 +443,9 @@ local cheatsheet = {
   "  Space fs / fd  関数などの一覧 / エラーを探す",
   "  Space w / q    保存 / 今のファイルを閉じる",
   "  Space r / R    今のファイルを実行 / もう一度実行",
+  "  Space u        変更の履歴 (undo) の一覧",
+  "  y / p          コピー / 貼り付け (ほかのアプリと共通)",
+  "  選択して Ctrl-C  コピー (右クリックのメニューも使えます)",
   "  Space cf       整形",
   "  Space xx       このファイルのエラー一覧",
   "  ]h / [h        次 / 前の変更箇所へ (git)",
@@ -403,6 +499,15 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 -- ===== プラグイン =====
+-- 補完の候補の種類の、日本語での呼び方
+local kind_ja = {
+  Text = "単語", Method = "メソッド", Function = "関数", Constructor = "コンストラクタ", Field = "メンバ",
+  Variable = "変数", Class = "型", Interface = "インターフェース", Module = "モジュール", Property = "プロパティ",
+  Unit = "単位", Value = "値", Enum = "列挙型", Keyword = "キーワード", Snippet = "ひな形", Color = "色",
+  File = "ファイル", Reference = "参照", Folder = "フォルダ", EnumMember = "列挙の値", Constant = "定数",
+  Struct = "構造体", Event = "イベント", Operator = "演算子", TypeParameter = "型の引数",
+}
+
 require("lazy").setup({
   -- カラースキーム (<leader>fc で切り替え。選んだテーマは次回起動時も復元)
   {
@@ -640,12 +745,15 @@ require("lazy").setup({
       { "<leader>fd", "<cmd>Telescope diagnostics<CR>", desc = "エラーを探す" },
       { "<leader>fk", "<cmd>Telescope keymaps<CR>", desc = "キーの割り当てを探す" },
       { "<leader>fs", function()
-        -- LSP があれば正確な一覧、無ければ treesitter (構文解析) の一覧
+        -- LSP があれば正確な一覧、無ければ treesitter (構文解析) の一覧、それも無ければ簡易版
         local b = require("telescope.builtin")
         if #vim.lsp.get_clients({ bufnr = 0, method = "textDocument/documentSymbol" }) > 0 then
           b.lsp_document_symbols()
-        else
+        elseif vim.treesitter.get_parser(0, nil, { error = false }) then
           b.treesitter()
+        else
+          -- どちらも無い環境 (C / C++ / Python のみ)
+          require("user.offline_cmp").outline()
         end
       end, desc = "関数などの一覧" },
     },
@@ -814,12 +922,22 @@ require("lazy").setup({
       -- 選んでいる候補の残りをカーソルの後ろに薄く表示 (例: #include <stdi → o.h> が薄く出る)
       -- no-icons のときは、候補一覧の種類アイコンの代わりに種類名 (Function など) を出す
       -- 候補を選ぶと、横に説明 (引数・使い方) を自動で表示する
-      completion = vim.tbl_extend("force", {
+      -- 候補の種類 (関数・変数など) は、日本語で表示する
+      completion = {
         ghost_text = { enabled = true },
         documentation = { auto_show = true, auto_show_delay_ms = 200, window = { border = "rounded" } },
-      }, icons and {} or {
-        menu = { draw = { columns = { { "label", "label_description", gap = 1 }, { "kind" } } } },
-      }),
+        menu = {
+          draw = {
+            columns = icons and { { "kind_icon" }, { "label", "label_description", gap = 1 }, { "kind" } }
+              or { { "label", "label_description", gap = 1 }, { "kind" } },
+            components = {
+              kind = {
+                text = function(ctx) return kind_ja[ctx.kind] or ctx.kind end,
+              },
+            },
+          },
+        },
+      },
       -- 関数名( を打つと、引数の一覧を表示する (LSP があるとき。無いときは lua/user/offline_cmp.lua が表示する)
       signature = { enabled = true, window = { border = "rounded" } },
       -- 候補の絞り込みは Rust 版 (完成品を自動ダウンロード。ビルド不要)。取得できない環境では Lua 版で動く
@@ -961,6 +1079,8 @@ if vim.fn.executable("pylsp") == 1 and vim.fn.executable("pyright-langserver") =
 end
 -- clangd が無い環境では、gcc でエラーを調べて表示する (lua/user/c_check.lua)
 require("user.c_check").setup()
+-- Python も同じく、LSP が無い環境では python 自身で構文エラーを調べて表示する (lua/user/py_check.lua)
+require("user.py_check").setup()
 
 -- ===== エラー / 警告の表示 =====
 -- 行の右側にエラー内容を表示し、左端に E/W などの印を出す
