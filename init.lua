@@ -97,8 +97,6 @@ do
   vim.g.clipboard_kind = kind
   if kind then o.clipboard = "unnamedplus" end
 end
--- 選択して Ctrl-C でもコピーできる (Vim 本来の Ctrl-C は「選択をやめる」だけなので、コピーしてからやめる)
-vim.keymap.set("x", "<C-c>", '"+y', { desc = "コピー (y と同じ)" })
 
 -- 右クリックのメニューを日本語にする (標準のメニューは英語)
 vim.api.nvim_create_autocmd("VimEnter", {
@@ -445,7 +443,6 @@ local cheatsheet = {
   "  Space r / R    今のファイルを実行 / もう一度実行",
   "  Space u        変更の履歴 (undo) の一覧",
   "  y / p          コピー / 貼り付け (ほかのアプリと共通)",
-  "  選択して Ctrl-C  コピー (右クリックのメニューも使えます)",
   "  Space cf       整形",
   "  Space xx       このファイルのエラー一覧",
   "  ]h / [h        次 / 前の変更箇所へ (git)",
